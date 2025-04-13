@@ -1,13 +1,20 @@
+# Loop-Residual Neural Networks Implementation
 
-# nanoGPT
+This repository implements the Loop-Residual Neural Network architecture from the paper "Loop-Residual Neural Networks for Iterative Refinement" (Ng & Wang, 2024). The Loop-Residual approach enables better performance without increasing the model size by utilizing iterative refinement through loops with residual connections.
 
-![nanoGPT](assets/nanogpt.jpg)
+## Key Concept
 
-The simplest, fastest repository for training/finetuning medium-sized GPTs. It is a rewrite of [minGPT](https://github.com/karpathy/minGPT) that prioritizes teeth over education. Still under active development, but currently the file `train.py` reproduces GPT-2 (124M) on OpenWebText, running on a single 8XA100 40GB node in about 4 days of training. The code itself is plain and readable: `train.py` is a ~300-line boilerplate training loop and `model.py` a ~300-line GPT model definition, which can optionally load the GPT-2 weights from OpenAI. That's it.
+The core idea of Loop-Residual Neural Networks is simple but powerful:
+- Instead of passing input through many sequential layers (standard approach)
+- We loop over a smaller set of layers multiple times, refining the prediction with each pass
+- The model learns to predict the residual between the current state and the desired state
 
-![repro124m](assets/gpt2_124M_loss.png)
+This approach follows the formula: x^(n) = x^(n-1) + fθ(x^(n-1))
 
-Because the code is so simple, it is very easy to hack to your needs, train new models from scratch, or finetune pretrained checkpoints (e.g. biggest one currently available as a starting point would be the GPT-2 1.3B model from OpenAI).
+Where:
+- x^(n) is the hidden state at iteration n
+- x^(0) is the initial hidden state
+- fθ is the function that predicts the residual
 
 ## install
 
@@ -17,211 +24,185 @@ pip install torch numpy transformers datasets tiktoken wandb tqdm
 
 Dependencies:
 
-- [pytorch](https://pytorch.org) <3
-- [numpy](https://numpy.org/install/) <3
--  `transformers` for huggingface transformers <3 (to load GPT-2 checkpoints)
--  `datasets` for huggingface datasets <3 (if you want to download + preprocess OpenWebText)
--  `tiktoken` for OpenAI's fast BPE code <3
--  `wandb` for optional logging <3
--  `tqdm` for progress bars <3
+    pytorch <3
+    numpy <3
+    transformers for huggingface transformers <3 (to load GPT-2 checkpoints)
+    datasets for huggingface datasets <3 (if you want to download + preprocess OpenWebText)
+    tiktoken for OpenAI's fast BPE code <3
+    wandb for optional logging <3
+    tqdm for progress bars <3
 
-## quick start
 
-If you are not a deep learning professional and you just want to feel the magic and get your feet wet, the fastest way to get started is to train a character-level GPT on the works of Shakespeare. First, we download it as a single (1MB) file and turn it from raw text into one large stream of integers:
+## Project Structure
 
-```sh
-python data/shakespeare_char/prepare.py
+- `model.py` - Contains the implementation of the Loop-Residual GPT model
+- `train.py` - Training script adapted to support Loop-Residual architecture
+- `run_small_experiments.sh` - Script to run small-scale experiments
+- `run_experiments.sh` - Script to reproduce the paper's experiments
+
+## Installation
+
+1. Clone this repository:
+```bash
+git clone https://github.com/yourusername/loop-residual-nn.git
+cd loop-residual-nn
 ```
 
-This creates a `train.bin` and `val.bin` in that data directory. Now it is time to train your GPT. The size of it very much depends on the computational resources of your system:
-
-**I have a GPU**. Great, we can quickly train a baby GPT with the settings provided in the [config/train_shakespeare_char.py](config/train_shakespeare_char.py) config file:
-
-```sh
-python train.py config/train_shakespeare_char.py
+2. Install the required dependencies:
+```bash
+pip install torch numpy transformers datasets tiktoken wandb tqdm
 ```
 
-If you peek inside it, you'll see that we're training a GPT with a context size of up to 256 characters, 384 feature channels, and it is a 6-layer Transformer with 6 heads in each layer. On one A100 GPU this training run takes about 3 minutes and the best validation loss is 1.4697. Based on the configuration, the model checkpoints are being written into the `--out_dir` directory `out-shakespeare-char`. So once the training finishes we can sample from the best model by pointing the sampling script at this directory:
+## Reproducing Experiments
 
-```sh
-python sample.py --out_dir=out-shakespeare-char
+### Quick Start with Small Models
+
+For quick experimentation and validation of the Loop-Residual concept, we provide a script to train small models:
+
+```bash
+chmod +x run_small_experiments.sh
+./run_small_experiments.sh
 ```
 
-This generates a few samples, for example:
+This script runs four small-scale experiments:
+1. **Tiny-4L**: Baseline 4-layer model without looping
+2. **Tiny-2L-2Loop**: 2 layers looped twice (to compare with the 4-layer baseline)
+3. **Tiny-2L-3Loop**: 2 layers looped three times
+4. **Tiny-1L-4Loop**: 1 layer looped four times
 
-```
-ANGELO:
-And cowards it be strawn to my bed,
-And thrust the gates of my threats,
-Because he that ale away, and hang'd
-An one with him.
+These small models train quickly even on modest hardware, allowing you to validate the concept before scaling up.
 
-DUKE VINCENTIO:
-I thank your eyes against it.
+### Full Paper Reproduction
 
-DUKE VINCENTIO:
-Then will answer him to save the malm:
-And what have you tyrannous shall do this?
+To reproduce the experiments from the paper, use:
 
-DUKE VINCENTIO:
-If you have done evils of all disposition
-To end his power, the day of thrust for a common men
-That I leave, to fight with over-liking
-Hasting in a roseman.
+```bash
+chmod +x run_experiments.sh
+./run_experiments.sh
 ```
 
-lol  `¯\_(ツ)_/¯`. Not bad for a character-level model after 3 minutes of training on a GPU. Better results are quite likely obtainable by instead finetuning a pretrained GPT-2 model on this dataset (see finetuning section later).
+This runs the following key experiments:
+1. **GPT2-124M**: Standard GPT-2 model with 12 layers (baseline)
+2. **Loop-Residual GPT2-81M**: 6 layers looped 6 times - this is the main experiment from the paper
+3. **GPT2-45M-Lite**: Small model with 1 layer (baseline for small models)
+4. **Loop-Residual GPT2-45M**: 1 layer looped twice
 
-**I only have a macbook** (or other cheap computer). No worries, we can still train a GPT but we want to dial things down a notch. I recommend getting the bleeding edge PyTorch nightly ([select it here](https://pytorch.org/get-started/locally/) when installing) as it is currently quite likely to make your code more efficient. But even without it, a simple train run could look as follows:
+Note: These full-scale experiments require significant computational resources. For running on multiple GPUs or nodes, refer to the distributed training section below.
 
-```sh
-python train.py config/train_shakespeare_char.py --device=cpu --compile=False --eval_iters=20 --log_interval=1 --block_size=64 --batch_size=12 --n_layer=4 --n_head=4 --n_embd=128 --max_iters=2000 --lr_decay_iters=2000 --dropout=0.0
+### Custom Experiments
+
+To run a custom experiment, you can use the training script directly:
+
+```bash
+python train.py \
+  --out_dir="experiments/my_experiment" \
+  --use_loop_residual=True \
+  --n_loops=4 \
+  --loop_layers=3 \
+  --n_layer=3 \
+  --n_head=4 \
+  --n_embd=256 \
+  --batch_size=8 \
+  --max_iters=10000
 ```
 
-Here, since we are running on CPU instead of GPU we must set both `--device=cpu` and also turn off PyTorch 2.0 compile with `--compile=False`. Then when we evaluate we get a bit more noisy but faster estimate (`--eval_iters=20`, down from 200), our context size is only 64 characters instead of 256, and the batch size only 12 examples per iteration, not 64. We'll also use a much smaller Transformer (4 layers, 4 heads, 128 embedding size), and decrease the number of iterations to 2000 (and correspondingly usually decay the learning rate to around max_iters with `--lr_decay_iters`). Because our network is so small we also ease down on regularization (`--dropout=0.0`). This still runs in about ~3 minutes, but gets us a loss of only 1.88 and therefore also worse samples, but it's still good fun:
+## Distributed Training
 
-```sh
-python sample.py --out_dir=out-shakespeare-char --device=cpu
-```
-Generates samples like this:
+For training larger models on multiple GPUs:
 
-```
-GLEORKEN VINGHARD III:
-Whell's the couse, the came light gacks,
-And the for mought you in Aut fries the not high shee
-bot thou the sought bechive in that to doth groan you,
-No relving thee post mose the wear
-```
+```bash
+# On a single node with 4 GPUs:
+torchrun --standalone --nproc_per_node=4 train.py \
+  --out_dir="experiments/multi_gpu" \
+  --use_loop_residual=True \
+  --n_loops=6 \
+  --loop_layers=6
 
-Not bad for ~3 minutes on a CPU, for a hint of the right character gestalt. If you're willing to wait longer, feel free to tune the hyperparameters, increase the size of the network, the context length (`--block_size`), the length of training, etc.
+# Across multiple nodes:
+# On the first (master) node:
+torchrun --nproc_per_node=8 --nnodes=2 --node_rank=0 --master_addr=123.456.123.456 --master_port=1234 train.py \
+  --out_dir="experiments/multi_node" \
+  --use_loop_residual=True \
+  --n_loops=6 \
+  --loop_layers=6
 
-Finally, on Apple Silicon Macbooks and with a recent PyTorch version make sure to add `--device=mps` (short for "Metal Performance Shaders"); PyTorch then uses the on-chip GPU that can *significantly* accelerate training (2-3X) and allow you to use larger networks. See [Issue 28](https://github.com/karpathy/nanoGPT/issues/28) for more.
-
-## reproducing GPT-2
-
-A more serious deep learning professional may be more interested in reproducing GPT-2 results. So here we go - we first tokenize the dataset, in this case the [OpenWebText](https://openwebtext2.readthedocs.io/en/latest/), an open reproduction of OpenAI's (private) WebText:
-
-```sh
-python data/openwebtext/prepare.py
-```
-
-This downloads and tokenizes the [OpenWebText](https://huggingface.co/datasets/openwebtext) dataset. It will create a `train.bin` and `val.bin` which holds the GPT2 BPE token ids in one sequence, stored as raw uint16 bytes. Then we're ready to kick off training. To reproduce GPT-2 (124M) you'll want at least an 8X A100 40GB node and run:
-
-```sh
-torchrun --standalone --nproc_per_node=8 train.py config/train_gpt2.py
+# On the worker node:
+torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123.456 --master_port=1234 train.py \
+  --out_dir="experiments/multi_node" \
+  --use_loop_residual=True \
+  --n_loops=6 \
+  --loop_layers=6
 ```
 
-This will run for about 4 days using PyTorch Distributed Data Parallel (DDP) and go down to loss of ~2.85. Now, a GPT-2 model just evaluated on OWT gets a val loss of about 3.11, but if you finetune it it will come down to ~2.85 territory (due to an apparent domain gap), making the two models ~match.
+## Results
 
-If you're in a cluster environment and you are blessed with multiple GPU nodes you can make GPU go brrrr e.g. across 2 nodes like:
+According to the paper, these are the expected results:
 
-```sh
-# Run on the first (master) node with example IP 123.456.123.456:
-torchrun --nproc_per_node=8 --nnodes=2 --node_rank=0 --master_addr=123.456.123.456 --master_port=1234 train.py
-# Run on the worker node:
-torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123.456 --master_port=1234 train.py
-```
+| Model | Parameters | Layers | Loops | Validation Loss |
+|-------|------------|--------|-------|----------------|
+| GPT2-124M | 124M | 12 | 1 | 3.12 |
+| Loop-Residual GPT2-81M | 81M | 6 | 6 | 3.11 |
+| Lite GPT2-45M | 45M | 1 | 1 | 3.98 |
+| Loop-Residual GPT2-45M | 45M | 1 | 2 | 3.67 |
 
-It is a good idea to benchmark your interconnect (e.g. iperf3). In particular, if you don't have Infiniband then also prepend `NCCL_IB_DISABLE=1` to the above launches. Your multinode training will work, but most likely _crawl_. By default checkpoints are periodically written to the `--out_dir`. We can sample from the model by simply `python sample.py`.
+The key finding is that Loop-Residual GPT2-81M achieves comparable performance to the larger GPT2-124M despite having 35% fewer parameters, by using iterative refinement through looping.
 
-Finally, to train on a single GPU simply run the `python train.py` script. Have a look at all of its args, the script tries to be very readable, hackable and transparent. You'll most likely want to tune a number of those variables depending on your needs.
+## How Loop-Residual Works
 
-## baselines
-
-OpenAI GPT-2 checkpoints allow us to get some baselines in place for openwebtext. We can get the numbers as follows:
-
-```sh
-$ python train.py config/eval_gpt2.py
-$ python train.py config/eval_gpt2_medium.py
-$ python train.py config/eval_gpt2_large.py
-$ python train.py config/eval_gpt2_xl.py
-```
-
-and observe the following losses on train and val:
-
-| model | params | train loss | val loss |
-| ------| ------ | ---------- | -------- |
-| gpt2 | 124M         | 3.11  | 3.12     |
-| gpt2-medium | 350M  | 2.85  | 2.84     |
-| gpt2-large | 774M   | 2.66  | 2.67     |
-| gpt2-xl | 1558M     | 2.56  | 2.54     |
-
-However, we have to note that GPT-2 was trained on (closed, never released) WebText, while OpenWebText is just a best-effort open reproduction of this dataset. This means there is a dataset domain gap. Indeed, taking the GPT-2 (124M) checkpoint and finetuning on OWT directly for a while reaches loss down to ~2.85. This then becomes the more appropriate baseline w.r.t. reproduction.
-
-## finetuning
-
-Finetuning is no different than training, we just make sure to initialize from a pretrained model and train with a smaller learning rate. For an example of how to finetune a GPT on new text go to `data/shakespeare` and run `prepare.py` to download the tiny shakespeare dataset and render it into a `train.bin` and `val.bin`, using the OpenAI BPE tokenizer from GPT-2. Unlike OpenWebText this will run in seconds. Finetuning can take very little time, e.g. on a single GPU just a few minutes. Run an example finetuning like:
-
-```sh
-python train.py config/finetune_shakespeare.py
-```
-
-This will load the config parameter overrides in `config/finetune_shakespeare.py` (I didn't tune them much though). Basically, we initialize from a GPT2 checkpoint with `init_from` and train as normal, except shorter and with a small learning rate. If you're running out of memory try decreasing the model size (they are `{'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}`) or possibly decreasing the `block_size` (context length). The best checkpoint (lowest validation loss) will be in the `out_dir` directory, e.g. in `out-shakespeare` by default, per the config file. You can then run the code in `sample.py --out_dir=out-shakespeare`:
+In a standard Transformer, the input passes through all layers sequentially, with each layer processing the input once:
 
 ```
-THEODORE:
-Thou shalt sell me to the highest bidder: if I die,
-I sell thee to the first; if I go mad,
-I sell thee to the second; if I
-lie, I sell thee to the third; if I slay,
-I sell thee to the fourth: so buy or sell,
-I tell thee again, thou shalt not sell my
-possession.
-
-JULIET:
-And if thou steal, thou shalt not sell thyself.
-
-THEODORE:
-I do not steal; I sell the stolen goods.
-
-THEODORE:
-Thou know'st not what thou sell'st; thou, a woman,
-Thou art ever a victim, a thing of no worth:
-Thou hast no right, no right, but to be sold.
+Input → Layer 1 → Layer 2 → ... → Layer N → Output
 ```
 
-Whoa there, GPT, entering some dark place over there. I didn't really tune the hyperparameters in the config too much, feel free to try!
+In the Loop-Residual architecture, the input passes through a subset of layers multiple times, with each pass refining the previous output:
 
-## sampling / inference
-
-Use the script `sample.py` to sample either from pre-trained GPT-2 models released by OpenAI, or from a model you trained yourself. For example, here is a way to sample from the largest available `gpt2-xl` model:
-
-```sh
-python sample.py \
-    --init_from=gpt2-xl \
-    --start="What is the answer to life, the universe, and everything?" \
-    --num_samples=5 --max_new_tokens=100
+```
+Input → Loop 1: [Layer 1 → Layer 2] → Loop 2: [Layer 1 → Layer 2] → ... → Output
 ```
 
-If you'd like to sample from a model you trained, use the `--out_dir` to point the code appropriately. You can also prompt the model with some text from a file, e.g. ```python sample.py --start=FILE:prompt.txt```.
+This is implemented in the `LoopBlock` class in our code:
 
-## efficiency notes
+```python
+class LoopBlock(nn.Module):
+    def forward(self, x):
+        # Initial state x^(0)
+        x_initial = x
 
-For simple model benchmarking and profiling, `bench.py` might be useful. It's identical to what happens in the meat of the training loop of `train.py`, but omits much of the other complexities.
+        # Loop n times for iterative refinement
+        for _ in range(self.n_loops):
+            # Compute the residual through the blocks
+            residual = x.clone()
+            for block in self.blocks:
+                residual = block(residual)
 
-Note that the code by default uses [PyTorch 2.0](https://pytorch.org/get-started/pytorch-2.0/). At the time of writing (Dec 29, 2022) this makes `torch.compile()` available in the nightly release. The improvement from the one line of code is noticeable, e.g. cutting down iteration time from ~250ms / iter to 135ms / iter. Nice work PyTorch team!
+            # Update the state with the residual: x^(n) = x^(n-1) + fθ(x^(n-1))
+            x = x + (residual - x)
 
-## todos
+        return x
+```
 
-- Investigate and add FSDP instead of DDP
-- Eval zero-shot perplexities on standard evals (e.g. LAMBADA? HELM? etc.)
-- Finetune the finetuning script, I think the hyperparams are not great
-- Schedule for linear batch size increase during training
-- Incorporate other embeddings (rotary, alibi)
-- Separate out the optim buffers from model params in checkpoints I think
-- Additional logging around network health (e.g. gradient clip events, magnitudes)
-- Few more investigations around better init etc.
+## Customizing for Your Own Use
 
-## troubleshooting
+To adapt the Loop-Residual architecture for your own models:
 
-Note that by default this repo uses PyTorch 2.0 (i.e. `torch.compile`). This is fairly new and experimental, and not yet available on all platforms (e.g. Windows). If you're running into related error messages try to disable this by adding `--compile=False` flag. This will slow down the code but at least it will run.
+1. Modify the `LoopBlock` class to fit your architecture
+2. Adjust the looping parameters to balance computation vs. model size
+3. Experiment with different numbers of layers and loops
 
-For some context on this repository, GPT, and language modeling it might be helpful to watch my [Zero To Hero series](https://karpathy.ai/zero-to-hero.html). Specifically, the [GPT video](https://www.youtube.com/watch?v=kCc8FmEb1nY) is popular if you have some prior language modeling context.
+## Citing
 
-For more questions/discussions feel free to stop by **#nanoGPT** on Discord:
+If you use this implementation in your research, please cite the original paper:
 
-[![](https://dcbadge.vercel.app/api/server/3zy8kqD9Cp?compact=true&style=flat)](https://discord.gg/3zy8kqD9Cp)
+```
+@article{ng2024loop,
+  title={Loop-Residual Neural Networks for Iterative Refinement},
+  author={Ng, Kei-Sing and Wang, Qingchen},
+  journal={arXiv preprint arXiv:2409.14199},
+  year={2024}
+}
+```
 
-## acknowledgements
+## Acknowledgements
 
-All nanoGPT experiments are powered by GPUs on [Lambda labs](https://lambdalabs.com), my favorite Cloud GPU provider. Thank you Lambda labs for sponsoring nanoGPT!
+This implementation is built on nanoGPT by Andrej Karpathy. The Loop-Residual architecture is based on the paper by Ng & Wang (2024).

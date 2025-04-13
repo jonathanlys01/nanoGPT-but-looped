@@ -1,4 +1,6 @@
 """
+Training script for Loop-Residual GPT models.
+
 This training script can be run both on a single gpu in debug mode,
 and also in a larger training run with distributed data parallel (ddp).
 
@@ -27,7 +29,8 @@ import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
-from model import GPTConfig, GPT
+# Import the Loop-Residual model
+from model import GPTConfig, LoopResidualGPT  # Updated import
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -42,7 +45,7 @@ init_from = 'scratch' # 'scratch' or 'resume' or 'gpt2*'
 # wandb logging
 wandb_log = False # disabled by default
 wandb_project = 'owt'
-wandb_run_name = 'gpt2' # 'run' + str(time.time())
+wandb_run_name = 'loopgpt2' # 'run' + str(time.time())
 # data
 dataset = 'openwebtext'
 gradient_accumulation_steps = 5 * 8 # used to simulate larger batch sizes
@@ -54,6 +57,10 @@ n_head = 12
 n_embd = 768
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
 bias = False # do we use bias inside LayerNorm and Linear layers?
+# Loop-Residual model parameters
+use_loop_residual = True  # Enable Loop-Residual architecture
+n_loops = 6  # Number of times to loop over the blocks (as in the paper)
+loop_layers = 6  # Number of transformer layers in each loop block (as in the paper)
 # adamw optimizer
 learning_rate = 6e-4 # max learning rate
 max_iters = 600000 # total number of training iterations
@@ -69,7 +76,7 @@ min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchi
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
 # system
-device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+device = 'mps' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
 # -----------------------------------------------------------------------------
@@ -145,7 +152,12 @@ if os.path.exists(meta_path):
 
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=None, dropout=dropout) # start with model_args from command line
+                  bias=bias, vocab_size=None, dropout=dropout,
+                  # Add Loop-Residual parameters
+                  use_loop_residual=use_loop_residual,
+                  n_loops=n_loops,
+                  loop_layers=loop_layers)
+
 if init_from == 'scratch':
     # init a new model from scratch
     print("Initializing a new model from scratch")
@@ -154,7 +166,11 @@ if init_from == 'scratch':
         print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
     model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
     gptconf = GPTConfig(**model_args)
-    model = GPT(gptconf)
+    model = LoopResidualGPT(gptconf)  # Use LoopResidualGPT instead of GPT
+    if use_loop_residual:
+        print(f"Using Loop-Residual architecture with {loop_layers} layers and {n_loops} loops")
+    else:
+        print(f"Using standard architecture with {n_layer} layers")
 elif init_from == 'resume':
     print(f"Resuming training from {out_dir}")
     # resume training from a checkpoint.
@@ -163,11 +179,13 @@ elif init_from == 'resume':
     checkpoint_model_args = checkpoint['model_args']
     # force these config attributes to be equal otherwise we can't even resume training
     # the rest of the attributes (e.g. dropout) can stay as desired from command line
-    for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
-        model_args[k] = checkpoint_model_args[k]
+    for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size',
+              'use_loop_residual', 'n_loops', 'loop_layers']:  # Add Loop-Residual parameters
+        if k in checkpoint_model_args:  # Only set if the key exists in the checkpoint
+            model_args[k] = checkpoint_model_args[k]
     # create the model
     gptconf = GPTConfig(**model_args)
-    model = GPT(gptconf)
+    model = LoopResidualGPT(gptconf)  # Use LoopResidualGPT instead of GPT
     state_dict = checkpoint['model']
     # fix the keys of the state dictionary :(
     # honestly no idea how checkpoints sometimes get this prefix, have to debug more
@@ -181,11 +199,20 @@ elif init_from == 'resume':
 elif init_from.startswith('gpt2'):
     print(f"Initializing from OpenAI GPT-2 weights: {init_from}")
     # initialize from OpenAI GPT-2 weights
-    override_args = dict(dropout=dropout)
-    model = GPT.from_pretrained(init_from, override_args)
+    override_args = dict(dropout=dropout,
+                         use_loop_residual=use_loop_residual,
+                         n_loops=n_loops,
+                         loop_layers=loop_layers)
+    model = LoopResidualGPT.from_pretrained(init_from, override_args)  # Use LoopResidualGPT instead of GPT
     # read off the created config params, so we can store them into checkpoint correctly
-    for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
+    for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size',
+              'use_loop_residual', 'n_loops', 'loop_layers']:  # Add Loop-Residual parameters
         model_args[k] = getattr(model.config, k)
+    if use_loop_residual:
+        print(f"Using Loop-Residual architecture with {loop_layers} layers and {n_loops} loops")
+    else:
+        print(f"Using standard architecture with {n_layer} layers")
+
 # crop down the model block size if desired, using model surgery
 if block_size < model.config.block_size:
     model.crop_block_size(block_size)
@@ -244,6 +271,7 @@ def get_lr(it):
 # logging
 if wandb_log and master_process:
     import wandb
+    # Add Loop-Residual info to the config for wandb
     wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
 # training loop
@@ -264,12 +292,17 @@ while True:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
         if wandb_log:
+            # Add Loop-Residual info to wandb logs
             wandb.log({
                 "iter": iter_num,
                 "train/loss": losses['train'],
                 "val/loss": losses['val'],
                 "lr": lr,
                 "mfu": running_mfu*100, # convert to percentage
+                # Add Loop-Residual specific info
+                "use_loop_residual": use_loop_residual,
+                "n_loops": n_loops,
+                "loop_layers": loop_layers,
             })
         if losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val']

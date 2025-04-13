@@ -1,10 +1,7 @@
 """
-Full definition of a GPT Language Model, all of it in this single file.
-References:
-1) the official GPT-2 TensorFlow implementation released by OpenAI:
-https://github.com/openai/gpt-2/blob/master/src/model.py
-2) huggingface/transformers PyTorch implementation:
-https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
+Implementation of Loop-Residual GPT model based on:
+1) The Loop-Residual Neural Networks for Iterative Refinement paper
+2) Original GPT-2 implementation
 """
 
 import math
@@ -105,6 +102,30 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln_2(x))
         return x
 
+class LoopBlock(nn.Module):
+    """Loop-Residual block that performs multiple iterations over the transformer blocks"""
+
+    def __init__(self, config):
+        super().__init__()
+        self.blocks = nn.ModuleList([Block(config) for _ in range(config.loop_layers)])
+        self.n_loops = config.n_loops
+
+    def forward(self, x):
+        # Initial state x^(0)
+        x_initial = x
+
+        # Loop n times for iterative refinement
+        for _ in range(self.n_loops):
+            # Compute the residual through the blocks
+            residual = x.clone()
+            for block in self.blocks:
+                residual = block(residual)
+
+            # Update the state with the residual: x^(n) = x^(n-1) + fθ(x^(n-1))
+            x = x + (residual - x)
+
+        return x
+
 @dataclass
 class GPTConfig:
     block_size: int = 1024
@@ -114,8 +135,13 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    # Loop-Residual parameters
+    use_loop_residual: bool = False  # Whether to use Loop-Residual architecture
+    n_loops: int = 1  # Number of times to loop over the blocks
+    loop_layers: int = 1  # Number of transformer layers in each loop block
 
-class GPT(nn.Module):
+class LoopResidualGPT(nn.Module):
+    """GPT Language Model with Loop-Residual architecture"""
 
     def __init__(self, config):
         super().__init__()
@@ -127,9 +153,16 @@ class GPT(nn.Module):
             wte = nn.Embedding(config.vocab_size, config.n_embd),
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
-            h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
+
+        # Use Loop-Residual architecture if specified
+        if config.use_loop_residual:
+            self.transformer.h = LoopBlock(config)
+        else:
+            # Standard architecture with sequential layers
+            self.transformer.h = nn.ModuleList([Block(config) for _ in range(config.n_layer)])
+
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
@@ -177,8 +210,16 @@ class GPT(nn.Module):
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
         pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
         x = self.transformer.drop(tok_emb + pos_emb)
-        for block in self.transformer.h:
-            x = block(x)
+
+        # Process through transformer blocks
+        if self.config.use_loop_residual:
+            # For Loop-Residual, h is a LoopBlock module
+            x = self.transformer.h(x)
+        else:
+            # Standard sequential processing
+            for block in self.transformer.h:
+                x = block(x)
+
         x = self.transformer.ln_f(x)
 
         if targets is not None:
@@ -208,7 +249,7 @@ class GPT(nn.Module):
         assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
         override_args = override_args or {} # default to empty dict
         # only dropout can be overridden see more notes below
-        assert all(k == 'dropout' for k in override_args)
+        assert all(k in ['dropout', 'use_loop_residual', 'n_loops', 'loop_layers'] for k in override_args)
         from transformers import GPT2LMHeadModel
         print("loading weights from pretrained gpt: %s" % model_type)
 
@@ -223,13 +264,22 @@ class GPT(nn.Module):
         config_args['vocab_size'] = 50257 # always 50257 for GPT model checkpoints
         config_args['block_size'] = 1024 # always 1024 for GPT model checkpoints
         config_args['bias'] = True # always True for GPT model checkpoints
+
+        # Set Loop-Residual parameters
+        config_args['use_loop_residual'] = override_args.get('use_loop_residual', False)
+        config_args['n_loops'] = override_args.get('n_loops', 1)
+        config_args['loop_layers'] = override_args.get('loop_layers', 1)
+
         # we can override the dropout rate, if desired
         if 'dropout' in override_args:
             print(f"overriding dropout rate to {override_args['dropout']}")
             config_args['dropout'] = override_args['dropout']
-        # create a from-scratch initialized minGPT model
+
+        # create a from-scratch initialized model
         config = GPTConfig(**config_args)
-        model = GPT(config)
+        model = LoopResidualGPT(config)
+
+        # Load pretrained weights
         sd = model.state_dict()
         sd_keys = sd.keys()
         sd_keys = [k for k in sd_keys if not k.endswith('.attn.bias')] # discard this mask / buffer, not a param
@@ -238,25 +288,47 @@ class GPT(nn.Module):
         model_hf = GPT2LMHeadModel.from_pretrained(model_type)
         sd_hf = model_hf.state_dict()
 
-        # copy while ensuring all of the parameters are aligned and match in names and shapes
-        sd_keys_hf = sd_hf.keys()
-        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')] # ignore these, just a buffer
-        sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')] # same, just the mask (buffer)
-        transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
-        # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
-        # this means that we have to transpose these weights when we import them
-        assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
-        for k in sd_keys_hf:
-            if any(k.endswith(w) for w in transposed):
-                # special treatment for the Conv1D weights we need to transpose
-                assert sd_hf[k].shape[::-1] == sd[k].shape
-                with torch.no_grad():
-                    sd[k].copy_(sd_hf[k].t())
-            else:
-                # vanilla copy over the other parameters
-                assert sd_hf[k].shape == sd[k].shape
-                with torch.no_grad():
-                    sd[k].copy_(sd_hf[k])
+        # Map the standard GPT-2 weights to our Loop-Residual architecture
+        if config.use_loop_residual:
+            sd_new = {}
+            for k, v in sd.items():
+                if k.startswith('transformer.h.'):
+                    # For the loop block parameters, we use the first n_layer weights from pretrained model
+                    parts = k.split('.')
+                    if parts[1] == 'h' and parts[2].isdigit():
+                        layer_idx = int(parts[2])
+                        if layer_idx < config.loop_layers:
+                            # Map to our loop layers
+                            new_key = f"transformer.h.blocks.{layer_idx}.{'.'.join(parts[3:])}"
+                            sd_new[new_key] = sd_hf[k]
+                else:
+                    # For non-transformer blocks (embeddings, layer norm)
+                    if k in sd_hf:
+                        sd_new[k] = sd_hf[k]
+
+            # Update the model with the mapped weights
+            missing_keys, unexpected_keys = model.load_state_dict(sd_new, strict=False)
+            print(f"Missing keys: {missing_keys}")
+            print(f"Unexpected keys: {unexpected_keys}")
+        else:
+            # Standard weight loading for non-loop models
+            sd_keys_hf = sd_hf.keys()
+            sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.masked_bias')] # ignore these, just a buffer
+            sd_keys_hf = [k for k in sd_keys_hf if not k.endswith('.attn.bias')] # same, just the mask (buffer)
+            transposed = ['attn.c_attn.weight', 'attn.c_proj.weight', 'mlp.c_fc.weight', 'mlp.c_proj.weight']
+
+            assert len(sd_keys_hf) == len(sd_keys), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
+            for k in sd_keys_hf:
+                if any(k.endswith(w) for w in transposed):
+                    # special treatment for the Conv1D weights we need to transpose
+                    assert sd_hf[k].shape[::-1] == sd[k].shape
+                    with torch.no_grad():
+                        sd[k].copy_(sd_hf[k].t())
+                else:
+                    # vanilla copy over the other parameters
+                    assert sd_hf[k].shape == sd[k].shape
+                    with torch.no_grad():
+                        sd[k].copy_(sd_hf[k])
 
         return model
 
@@ -302,6 +374,7 @@ class GPT(nn.Module):
         mfu = flops_achieved / flops_promised
         return mfu
 
+
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
         """
@@ -328,3 +401,51 @@ class GPT(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
 
         return idx
+
+# Example of creating a Loop-Residual GPT model
+def create_loop_residual_gpt(model_size='gpt2', n_loops=6, loop_layers=6):
+    """
+    Create a Loop-Residual GPT model with the specified parameters.
+
+    Args:
+        model_size: Base GPT-2 model size ('gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl')
+        n_loops: Number of times to loop over the transformer blocks
+        loop_layers: Number of transformer layers in each loop block
+
+    Returns:
+        A Loop-Residual GPT model
+    """
+    # This replicates the GPT2-81M model from the paper (with 6 loops over 6 layers)
+    override_args = {
+        'use_loop_residual': True,
+        'n_loops': n_loops,
+        'loop_layers': loop_layers
+    }
+    model = LoopResidualGPT.from_pretrained(model_size, override_args)
+    return model
+
+# Example usage
+if __name__ == "__main__":
+    # Create a Loop-Residual GPT model similar to the one in the paper (GPT2-81M)
+    model = create_loop_residual_gpt(model_size='gpt2', n_loops=6, loop_layers=6)
+
+    # Print model information
+    total_params = model.get_num_params(non_embedding=False)
+    print(f"Loop-Residual GPT Model with {total_params/1e6:.2f}M parameters")
+    print(f"Loops: {model.config.n_loops}, Loop Layers: {model.config.loop_layers}")
+
+    # Generate text (requires tokenizer setup)
+    # ... (tokenizer setup code would go here)
+
+    # Example forward pass
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+
+    # Generate random input
+    batch_size, seq_length = 2, 10
+    idx = torch.randint(0, model.config.vocab_size, (batch_size, seq_length), device=device)
+
+    # Get predictions
+    with torch.no_grad():
+        logits, _ = model(idx)
+        print(f"Logits shape: {logits.shape}")
