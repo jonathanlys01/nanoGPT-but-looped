@@ -75,7 +75,7 @@ run_experiment \
     "gpt2" \
     "True" \
     "6" \
-    "6" \
+    "1" \
     "6"
 
 # Experiment 3: GPT2-45M-Lite (baseline)

@@ -84,7 +84,7 @@ run_experiment \
     "scratch" \
     "True" \
     "2" \
-    "2" \
+    "1" \
     "2" \
     "4" \
     "256"
@@ -97,7 +97,7 @@ run_experiment \
     "scratch" \
     "True" \
     "3" \
-    "2" \
+    "1" \
     "2" \
     "4" \
     "256"

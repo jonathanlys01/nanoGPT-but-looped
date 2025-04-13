@@ -402,50 +402,5 @@ class LoopResidualGPT(nn.Module):
 
         return idx
 
-# Example of creating a Loop-Residual GPT model
-def create_loop_residual_gpt(model_size='gpt2', n_loops=6, loop_layers=6):
-    """
-    Create a Loop-Residual GPT model with the specified parameters.
 
-    Args:
-        model_size: Base GPT-2 model size ('gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl')
-        n_loops: Number of times to loop over the transformer blocks
-        loop_layers: Number of transformer layers in each loop block
 
-    Returns:
-        A Loop-Residual GPT model
-    """
-    # This replicates the GPT2-81M model from the paper (with 6 loops over 6 layers)
-    override_args = {
-        'use_loop_residual': True,
-        'n_loops': n_loops,
-        'loop_layers': loop_layers
-    }
-    model = LoopResidualGPT.from_pretrained(model_size, override_args)
-    return model
-
-# Example usage
-if __name__ == "__main__":
-    # Create a Loop-Residual GPT model similar to the one in the paper (GPT2-81M)
-    model = create_loop_residual_gpt(model_size='gpt2', n_loops=6, loop_layers=6)
-
-    # Print model information
-    total_params = model.get_num_params(non_embedding=False)
-    print(f"Loop-Residual GPT Model with {total_params/1e6:.2f}M parameters")
-    print(f"Loops: {model.config.n_loops}, Loop Layers: {model.config.loop_layers}")
-
-    # Generate text (requires tokenizer setup)
-    # ... (tokenizer setup code would go here)
-
-    # Example forward pass
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-
-    # Generate random input
-    batch_size, seq_length = 2, 10
-    idx = torch.randint(0, model.config.vocab_size, (batch_size, seq_length), device=device)
-
-    # Get predictions
-    with torch.no_grad():
-        logits, _ = model(idx)
-        print(f"Logits shape: {logits.shape}")
