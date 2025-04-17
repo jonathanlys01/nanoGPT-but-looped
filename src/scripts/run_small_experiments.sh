@@ -13,6 +13,8 @@ COMPILE=False    # Set to False for compatibility, can enable for speed
 WANDB_LOG=True   # Enable wandb logging
 DROPOUT=0.1      # Adding some dropout for these smaller models
 
+N_GPUS=$(lspci | grep -i 'nvidia' | wc -l)
+
 # Function to run an experiment with the given parameters
 run_experiment() {
     NAME=$1
@@ -38,23 +40,23 @@ run_experiment() {
     echo "Model dimensions: heads=$N_HEAD, embedding=$N_EMBD"
     echo "============================================================"
 
-    python train.py \
-        --out_dir="$OUTPUT_DIR" \
-        --wandb_run_name="$NAME" \
-        --init_from="$INIT_FROM" \
-        --use_loop_residual="$USE_LOOP" \
-        --n_loops="$LOOPS" \
-        --loop_layers="$LOOP_LAYERS" \
-        --n_layer="$N_LAYER" \
-        --n_head="$N_HEAD" \
-        --n_embd="$N_EMBD" \
-        --batch_size="$BATCH_SIZE" \
-        --learning_rate="$LEARNING_RATE" \
-        --dataset="$DATASET" \
-        --max_iters="$MAX_ITERS" \
-        --compile="$COMPILE" \
-        --wandb_log="$WANDB_LOG" \
-        --dropout="$DROPOUT"
+    torchrun --nproc_per_node=$N_GPUS train.py \
+        out_dir="$OUTPUT_DIR" \
+        wandb_run_name="$NAME" \
+        init_from="$INIT_FROM" \
+        model.use_loop_residual="$USE_LOOP" \
+        model.n_loops="$LOOPS" \
+        model.loop_layers="$LOOP_LAYERS" \
+        model.n_layer="$N_LAYER" \
+        model.n_head="$N_HEAD" \
+        model.n_embd="$N_EMBD" \
+        model.dropout="$DROPOUT" \
+        batch_size="$BATCH_SIZE" \
+        learning_rate="$LEARNING_RATE" \
+        dataset="$DATASET" \
+        max_iters="$MAX_ITERS" \
+        compile="$COMPILE" \
+        wandb_log="$WANDB_LOG"
 
     echo "Experiment $NAME completed."
     echo ""
@@ -62,6 +64,8 @@ run_experiment() {
 
 # Make sure we have the required directories
 mkdir -p small_experiments
+
+################################################
 
 # Experiment 1: Tiny-4L (baseline)
 # Small 4-layer model without loop-residual
