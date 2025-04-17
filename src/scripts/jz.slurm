@@ -3,18 +3,17 @@
 #SBATCH --account=vaz@a100
 #SBATCH --constraint=a100
 #SBATCH --nodes=2
-#SBATCH --ntasks-per-node=4
-#SBATCH --gres=gpu:4
-#SBATCH --cpus-per-task=10
+#SBATCH --ntasks-per-node=8
+#SBATCH --gres=gpu:8
+#SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
 
 #SBATCH --job-name=looped-nanogpt
 #SBATCH --output=slurm-logs/%j-%x-%j.out
 #SBATCH --error=slurm-logs/%j-%x-%j.err
-#SBATCH --time=10:00:00
-#SBATCH --qos=qos_gpu_a100-t3
-
-# Load the modules      
+#SBATCH --time=00:30:00
+#SBATCH --qos=qos_gpu_a100-dev
+# Load the modules
 
 echo "Job started at $(date)"
 export WANDB_MODE=offline
@@ -26,7 +25,7 @@ module load pytorch-gpu/py3/2.6.0
 mkdir -p slurm-logs
 mkdir -p small_experiments
 
-srun train.py \
+srun python train.py \
         out_dir="small_experiments/test" \
         wandb_run_name="derisk_run" \
         model.n_encoder=0 \
@@ -41,4 +40,3 @@ srun train.py \
         dataset='openwebtext' \
         max_iters=200 \
         wandb_log=False
-

@@ -5,8 +5,8 @@ Implementation of Loop-Residual GPT model based on:
 """
 
 import math
-import os
 
+import idr_torch
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -188,7 +188,7 @@ class LoopResidualGPT(nn.Module):
 
     def print(self, s):
         # only self.print on rank 0
-        if int(os.environ["RANK"], 0) == 0:
+        if idr_torch.rank == 0:
             print(s)
 
     def get_num_params(self, non_embedding=True):
