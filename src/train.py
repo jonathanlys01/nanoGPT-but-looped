@@ -33,7 +33,12 @@ def _setup_ddp(config: Config) -> DDPConfig:
     if config.ddp:
         import idr_torch
 
-        init_process_group(backend=config.backend)
+        init_process_group(
+            backend=config.backend,
+            init_method="env://",
+            world_size=idr_torch.size,
+            rank=idr_torch.rank,
+        )
 
         ddp_rank = idr_torch.rank
         ddp_local_rank = idr_torch.local_rank

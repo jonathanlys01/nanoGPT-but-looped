@@ -56,7 +56,7 @@ class Config:
     min_lr: float = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
     # DDP settings
     backend: str = "nccl"  # 'nccl', 'gloo', etc.
-    ddp: bool = int(os.environ.get("RANK", "-1")) != -1  # is this a ddp run?
+    ddp: bool = True
     # system
     device: str = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
     dtype: str = "bfloat16"
