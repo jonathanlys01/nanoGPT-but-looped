@@ -38,7 +38,7 @@ class Config:
     wandb_run_name: str = f"run{time()}"
     # data
     dataset: str = "openwebtext"
-    gradient_accumulation_steps: int = 5 * 8  # used to simulate larger batch sizes
+    gradient_accumulation_steps: int = 16 * 2  # used to simulate larger batch sizes
     batch_size: int = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
     # model
     model: GPTConfig = field(default_factory=GPTConfig)
