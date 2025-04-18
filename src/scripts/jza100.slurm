@@ -2,6 +2,7 @@
 
 #SBATCH --account=vaz@a100
 #SBATCH --constraint=a100
+
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=8
 #SBATCH --gres=gpu:8
@@ -14,6 +15,8 @@
 #SBATCH --time=00:30:00
 #SBATCH --qos=qos_gpu_a100-dev
 # Load the modules
+
+set -x
 
 echo "Job started at $(date)"
 export WANDB_MODE=offline

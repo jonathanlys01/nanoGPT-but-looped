@@ -55,6 +55,7 @@ class Config:
     lr_decay_iters: int = 600000  # should be ~= max_iters per Chinchilla
     min_lr: float = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
     # DDP settings
+    debug: bool = False
     backend: str = "nccl"  # 'nccl', 'gloo', etc.
     ddp: bool = True
     # system

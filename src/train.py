@@ -78,6 +78,18 @@ def _reduce_mean(tensor: torch.Tensor, world_size: int) -> torch.Tensor:
     return rt
 
 
+def _debug_ddp():
+    import socket
+
+    print(
+        f"[Rank {os.environ.get('RANK')}] Host: {socket.gethostname()}, "
+        f"Local Rank: {os.environ.get('LOCAL_RANK')}, "
+        f"World Size: {os.environ.get('WORLD_SIZE')}, ",
+    )
+
+    print(f"Distributed initialized: {torch.distributed.is_initialized()}")
+
+
 #######################################################################
 # Data
 # Poor man's dataloader, just a function to get a batch of data
@@ -171,6 +183,9 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
 
     # model init
     model_args = config.model
+
+    if config.debug:
+        _debug_ddp()
 
     if config.init_from == "scratch":
         # init a new model from scratch
