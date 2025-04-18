@@ -41,7 +41,7 @@ srun python train.py \
         batch_size=8 \
         learning_rate=6e-4 \
         dataset='openwebtext' \
-        max_iters=10 \
+        max_iters=100 \
         wandb_log=False \
         gradient_accumulation_steps=4 \
         debug=True

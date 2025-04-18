@@ -32,6 +32,7 @@ class Config:
     init_from: str = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
     seed: int = 1337  # random seed for initialization
     num_workers: int = 4  # number of data loading workers
+    prefetch_factor: int = 3  # number of batches to prefetch
     # wandb logging
     wandb_log: bool = False  # disabled by default
     wandb_project: str = "looped-gpt2"

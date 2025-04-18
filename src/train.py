@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from torch.distributed import all_reduce, destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import IterableDataset
 
 # Import the Loop-Residual model
 from config import Config, GPTConfig
@@ -83,6 +84,14 @@ def _reduce_mean(tensor: torch.Tensor, world_size: int) -> torch.Tensor:
 # Poor man's dataloader, just a function to get a batch of data
 
 
+def _move(x: torch.Tensor, y: torch.Tensor, device):
+    if "cuda" in device:
+        x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+    else:
+        x, y = x.to(device), y.to(device)
+    return x, y
+
+
 def get_batch(config: Config, split: str) -> tuple[torch.Tensor, torch.Tensor]:
     # We recreate np.memmap every batch to avoid a memory leak, as per
     # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
@@ -93,12 +102,37 @@ def get_batch(config: Config, split: str) -> tuple[torch.Tensor, torch.Tensor]:
     ix = torch.randint(len(data) - config.model.block_size, (config.batch_size,))
     x = torch.stack([torch.from_numpy((data[i : i + config.model.block_size]).astype(np.int64)) for i in ix])
     y = torch.stack([torch.from_numpy((data[i + 1 : i + 1 + config.model.block_size]).astype(np.int64)) for i in ix])
-    if "cuda" in config.device:
-        # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-        x, y = x.pin_memory().to(config.device, non_blocking=True), y.pin_memory().to(config.device, non_blocking=True)
-    else:
-        x, y = x.to(config.device), y.to(config.device)
+
     return x, y
+
+
+class MemmapDataset(IterableDataset):
+    def __init__(self, config: Config, split: str):
+        super().__init__()
+        self.config = config
+        self.split = split
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        if worker_info is not None:
+            torch.manual_seed(torch.initial_seed() + worker_info.id)
+
+        while True:
+            x, y = get_batch(config=self.config, split=self.split)
+            yield x, y
+
+
+def get_dataloader(config: Config, split: str):
+    dataset = MemmapDataset(config=config, split=split)
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=None,  # already batched
+        num_workers=config.num_workers,
+        pin_memory=True,
+        prefetch_factor=config.prefetch_factor,
+        persistent_workers=True,
+    )
+    return dataloader
 
 
 #######################################################################
@@ -114,6 +148,7 @@ def estimate_loss(model, config: Config, ctx):
         losses = torch.zeros(config.eval_iters).to(config.device)
         for k in range(config.eval_iters):
             X, Y = get_batch(config=config, split=split)
+            X, Y = _move(X, Y, config.device)  # move to GPU
             with ctx:
                 _, loss = model(X, Y)
             losses[k] = loss
@@ -308,13 +343,18 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
     monitor.step("optimizer/compile/(wandb) init")
 
     # training loop
-    X, Y = get_batch(config=config, split="train")  # fetch first batch
+
+    loader = get_dataloader(config=config, split="train")
+    iterator = iter(loader)
+    monitor.step("get dataloader")
+
+    X, Y = next(iterator)
+    X, Y = _move(X, Y, config.device)  # move to GPU
+    monitor.step("get first batch")
     t0 = time.time()
     local_iter_num = 0  # number of iterations in the lifetime of this process
     raw_model = model.module if config.ddp else model  # unwrap DDP container if needed
     running_mfu = -1.0
-
-    monitor.step("get first batch")
 
     while True:
         # determine and set the learning rate for this iteration
@@ -389,7 +429,8 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
                 loss = loss / ddp.gradient_accumulation_steps  # scale the loss to account for gradient accumulation
             monitor.step(f"[{iter_num}/{micro_step}] forward")
             # immediately async prefetch next batch while model is doing the forward pass on the GPU
-            X, Y = get_batch(config=config, split="train")
+            X, Y = next(iterator)
+            X, Y = _move(X, Y, config.device)  # move to GPU
             monitor.step(f"[{iter_num}/{micro_step}] get next batch")
             # backward pass, with gradient scaling if training in fp16
             scaler.scale(loss).backward()

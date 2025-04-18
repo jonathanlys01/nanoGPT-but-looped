@@ -22,10 +22,10 @@ torchrun --nproc_per_node=$N_GPUS train.py \
         batch_size=8 \
         learning_rate=6e-4 \
         dataset=openwebtext \
-        max_iters=2 \
+        max_iters=20 \
         wandb_log=False \
         debug=True \
-        gradient_accumulation_steps=4
+        gradient_accumulation_steps=8
         # profile=True
 
 
