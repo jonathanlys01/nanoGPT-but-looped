@@ -8,7 +8,7 @@ from os.path import join as pjoin
 
 import numpy as np
 import torch
-from torch.distributed import destroy_process_group, init_process_group
+from torch.distributed import all_reduce, destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 # Import the Loop-Residual model
@@ -33,16 +33,17 @@ def _setup_ddp(config: Config) -> DDPConfig:
     if config.ddp:
         import idr_torch
 
-        init_process_group(
-            backend=config.backend,
-            init_method="env://",
-            world_size=idr_torch.size,
-            rank=idr_torch.rank,
-        )
-
         ddp_rank = idr_torch.rank
         ddp_local_rank = idr_torch.local_rank
         ddp_world_size = idr_torch.size
+
+        init_process_group(
+            backend=config.backend,
+            init_method="env://",
+            world_size=ddp_world_size,
+            rank=ddp_rank,
+        )
+
         device = f"cuda:{ddp_local_rank}"
         torch.cuda.set_device(device)
         master_process = ddp_rank == 0  # this process will do logging, checkpointing etc.
@@ -66,6 +67,15 @@ def _setup_ddp(config: Config) -> DDPConfig:
         gradient_accumulation_steps=gradient_accumulation_steps,
         local_rank=ddp_local_rank,
     )
+
+
+def _reduce_mean(tensor: torch.Tensor, world_size: int) -> torch.Tensor:
+    if world_size == 1:
+        return tensor
+    rt = tensor.clone()
+    all_reduce(rt, op=torch.distributed.ReduceOp.SUM)
+    rt /= world_size
+    return rt
 
 
 #######################################################################
@@ -101,12 +111,12 @@ def estimate_loss(model, config: Config, ctx):
     out = {}
     model.eval()
     for split in ["train", "val"]:
-        losses = torch.zeros(config.eval_iters)
+        losses = torch.zeros(config.eval_iters).to(config.device)
         for k in range(config.eval_iters):
             X, Y = get_batch(config=config, split=split)
             with ctx:
                 _, loss = model(X, Y)
-            losses[k] = loss.item()
+            losses[k] = loss
         out[split] = losses.mean()
     model.train()
     return out
@@ -166,7 +176,7 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
         # init a new model from scratch
         print("Initializing a new model from scratch")
         # determine the vocab size we'll use for from-scratch training
-        if meta_vocab_size is None:
+        if meta_vocab_size is None and ddp.master_process:
             print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
         model_args["vocab_size"] = meta_vocab_size if meta_vocab_size is not None else 50304
         gptconf = GPTConfig(**model_args)
@@ -222,7 +232,8 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
         optimizer.load_state_dict(checkpoint["optimizer"])
     checkpoint = None  # free up memory
     if config.compile:
-        print("compiling the model... (takes a ~minute)")
+        if ddp.master_process:
+            print("compiling the model... (takes a ~minute)")
         model = torch.compile(model)  # requires PyTorch 2.0
 
     # wrap model into DDP container
@@ -250,47 +261,53 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
             param_group["lr"] = lr
 
         # evaluate the loss on train/val sets and write checkpoints
-        if iter_num % config.eval_interval == 0 and ddp.master_process:
+        if iter_num % config.eval_interval == 0:
             losses = estimate_loss(model, config, ctx)
-            print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
-            if config.wandb_log:
-                # Add Loop-Residual info to wandb logs
+            # reduce the losses across all processes
+            if config.ddp:
+                for k in losses:
+                    losses[k] = _reduce_mean(losses[k], ddp.world_size)
+            torch.cuda.synchronize()  # wait for all processes to finish
+            if ddp.master_process:
+                print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+                if config.wandb_log:
+                    # Add Loop-Residual info to wandb logs
 
-                loop_weights = model.module.transformer.get_loop_weights()
-                labels = [f"Loop {i + 1}" for i in range(len(loop_weights))]
-                data = [[label, weight] for (label, weight) in zip(labels, loop_weights)]
-                table = wandb.Table(data=data, columns=["label", "weight"])
-                plot = wandb.plot.bar(
-                    table,
-                    "label",
-                    "weight",
-                    title="Loop Weights",
-                )
+                    loop_weights = raw_model.transformer.get_loop_weights()
+                    labels = [f"Loop {i + 1}" for i in range(len(loop_weights))]
+                    data = [[label, weight] for (label, weight) in zip(labels, loop_weights)]
+                    table = wandb.Table(data=data, columns=["label", "weight"])
+                    plot = wandb.plot.bar(
+                        table,
+                        "label",
+                        "weight",
+                        title="Loop Weights",
+                    )
 
-                wandb.log(
-                    {
-                        "iter": iter_num,
-                        "train/loss": losses["train"],
-                        "val/loss": losses["val"],
-                        "lr": lr,
-                        "mfu": running_mfu * 100,  # convert to percentage
-                        # Add Loop-Residual specific info
-                        "weights": plot,
-                    },
-                )
-            if losses["val"] < best_val_loss or config.always_save_checkpoint:
-                best_val_loss = losses["val"]
-                if iter_num > 0:
-                    checkpoint = {
-                        "model": raw_model.state_dict(),
-                        "optimizer": optimizer.state_dict(),
-                        "model_args": model_args,
-                        "iter_num": iter_num,
-                        "best_val_loss": best_val_loss,
-                        "config": config,
-                    }
-                    print(f"saving checkpoint to {config.out_dir}")
-                    torch.save(checkpoint, os.path.join(config.out_dir, "ckpt.pt"))
+                    wandb.log(
+                        {
+                            "iter": iter_num,
+                            "train/loss": losses["train"],
+                            "val/loss": losses["val"],
+                            "lr": lr,
+                            "mfu": running_mfu * 100,  # convert to percentage
+                            # Add Loop-Residual specific info
+                            "weights": plot,
+                        },
+                    )
+                if losses["val"] < best_val_loss or config.always_save_checkpoint:
+                    best_val_loss = losses["val"]
+                    if iter_num > 0:
+                        checkpoint = {
+                            "model": raw_model.state_dict(),
+                            "optimizer": optimizer.state_dict(),
+                            "model_args": model_args,
+                            "iter_num": iter_num,
+                            "best_val_loss": best_val_loss,
+                            "config": config,
+                        }
+                        print(f"saving checkpoint to {config.out_dir}")
+                        torch.save(checkpoint, os.path.join(config.out_dir, "ckpt.pt"))
         if iter_num == 0 and config.eval_only:
             break
 

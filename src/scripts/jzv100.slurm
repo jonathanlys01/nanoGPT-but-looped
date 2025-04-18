@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --account=vaz@v100
-#SBATCH --constraint=v100-32g
+#SBATCH --partition=gpu_p2
 
 #SBATCH --nodes=2
 #SBATCH --ntasks-per-node=8
@@ -13,7 +13,7 @@
 #SBATCH --output=slurm-logs/%j-%x-%j.out
 #SBATCH --error=slurm-logs/%j-%x-%j.err
 #SBATCH --time=00:30:00
-#SBATCH --qos=qos_gpu_a100-dev
+#SBATCH --qos=qos_gpu-dev
 # Load the modules
 
 set -x
@@ -41,5 +41,5 @@ srun python train.py \
         learning_rate=6e-4 \
         dataset='openwebtext' \
         max_iters=200 \
-        wandb_log=False \ 
+        wandb_log=False \
         compile=False
