@@ -61,7 +61,8 @@ class Config:
     # system
     device: str = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
     dtype: str = "bfloat16"
-    compile: bool = True  # use PyTorch 2.0 to compile the model to be faster
+    compile: bool = False  # use PyTorch 2.0 to compile the model to be faster
+    profile: bool = False  # use PyTorch profiler to profile the model
 
     def __post_init__(self):
         self.data_dir: str = os.path.join("data", self.dataset)

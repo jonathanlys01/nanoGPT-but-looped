@@ -22,8 +22,9 @@ torchrun --nproc_per_node=$N_GPUS train.py \
         batch_size=8 \
         learning_rate=6e-4 \
         dataset=openwebtext \
-        max_iters=200 \
-        wandb_log=False
+        max_iters=2 \
+        wandb_log=False \
+        # profile=True
 
 
 # time taken

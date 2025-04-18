@@ -78,18 +78,6 @@ def _reduce_mean(tensor: torch.Tensor, world_size: int) -> torch.Tensor:
     return rt
 
 
-def _debug_ddp():
-    import socket
-
-    print(
-        f"[Rank {os.environ.get('RANK')}] Host: {socket.gethostname()}, "
-        f"Local Rank: {os.environ.get('LOCAL_RANK')}, "
-        f"World Size: {os.environ.get('WORLD_SIZE')}, ",
-    )
-
-    print(f"Distributed initialized: {torch.distributed.is_initialized()}")
-
-
 #######################################################################
 # Data
 # Poor man's dataloader, just a function to get a batch of data
@@ -150,10 +138,47 @@ def get_lr(it, config: Config):
 
 
 #######################################################################
+# Debug
+
+
+def profiled_run(config: Config):
+    import torch.profiler
+
+    log_dir = "./log_dir"
+
+    os.makedirs(log_dir, exist_ok=True)
+
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(log_dir),
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+        with_flops=True,
+    ) as prof:
+        run(config, prof)
+
+
+def _debug_ddp():
+    import socket
+
+    print(
+        f"[Rank {os.environ.get('RANK')}] Host: {socket.gethostname()}, "
+        f"Local Rank: {os.environ.get('LOCAL_RANK')}, "
+        f"World Size: {os.environ.get('WORLD_SIZE')}, ",
+    )
+
+    print(f"Distributed initialized: {torch.distributed.is_initialized()}")
+
+
+#######################################################################
 # Main
 
 
-def run(config: Config):  # noqa: C901, PLR0912, PLR0915
+def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
     ddp = _setup_ddp(config)
     tokens_per_iter = ddp.gradient_accumulation_steps * ddp.world_size * config.batch_size * config.model.block_size
 
@@ -352,6 +377,9 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
         # flush the gradients as soon as we can, no need for this memory anymore
         optimizer.zero_grad(set_to_none=True)
 
+        if profiler:
+            profiler.step()
+
         # timing and logging
         t1 = time.time()
         dt = t1 - t0
@@ -379,4 +407,8 @@ if __name__ == "__main__":
     from config import get_config
 
     args = get_config()
-    run(args)
+
+    if args.profile:
+        profiled_run(args)
+    else:
+        run(args)
