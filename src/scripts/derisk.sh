@@ -24,6 +24,8 @@ torchrun --nproc_per_node=$N_GPUS train.py \
         dataset=openwebtext \
         max_iters=2 \
         wandb_log=False \
+        debug=True \
+        gradient_accumulation_steps=4
         # profile=True
 
 

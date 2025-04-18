@@ -174,12 +174,28 @@ def _debug_ddp():
     print(f"Distributed initialized: {torch.distributed.is_initialized()}")
 
 
+class Monitor:
+    def __init__(self, config: Config, is_master: bool):
+        self.active = config.debug and is_master
+        if not self.active:
+            return
+        self.cpt = time.time()
+
+    def step(self, step_name):
+        if not self.active:
+            return
+        now = time.time()
+        print(f"\033[92m> {step_name} | {(now - self.cpt) * 1000:.2f}ms\033[0m")
+        self.cpt = now
+
+
 #######################################################################
 # Main
 
 
 def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
     ddp = _setup_ddp(config)
+    monitor = Monitor(config, ddp.master_process)
     tokens_per_iter = ddp.gradient_accumulation_steps * ddp.world_size * config.batch_size * config.model.block_size
 
     if ddp.master_process:
@@ -264,6 +280,8 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
         model_args["block_size"] = config.model.block_size  # so that the checkpoint will have the right value
     model.to(config.device)
 
+    monitor.step("model init")
+
     # initialize a GradScaler. If enabled=False scaler is a no-op
     scaler = torch.amp.GradScaler(device="cuda", enabled=(config.dtype == "float16"))
     # optimizer
@@ -287,6 +305,8 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
         # Add Loop-Residual info to the config for wandb
         wandb.init(project=config.wandb_project, name=config.wandb_run_name, config=config)
 
+    monitor.step("optimizer/compile/(wandb) init")
+
     # training loop
     X, Y = get_batch(config=config, split="train")  # fetch first batch
     t0 = time.time()
@@ -294,11 +314,15 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
     raw_model = model.module if config.ddp else model  # unwrap DDP container if needed
     running_mfu = -1.0
 
+    monitor.step("get first batch")
+
     while True:
         # determine and set the learning rate for this iteration
         lr = get_lr(iter_num, config) if config.decay_lr else config.learning_rate
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
+
+        monitor.step(f"[{iter_num}] get learning rate")
 
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % config.eval_interval == 0:
@@ -353,29 +377,35 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
 
         # forward backward update, with optional gradient accumulation to simulate larger batch size
         # and using the GradScaler if data type is float16
-        for micro_step in range(config.gradient_accumulation_steps):
+        for micro_step in range(ddp.gradient_accumulation_steps):
             if config.ddp:
                 # in DDP training we only need to sync gradients at the last micro step.
                 # the official way to do this is with model.no_sync() context manager, but
                 # I really dislike that this bloats the code and forces us to repeat code
                 # looking at the source of that context manager, it just toggles this variable
-                model.require_backward_grad_sync = micro_step == config.gradient_accumulation_steps - 1
+                model.require_backward_grad_sync = micro_step == ddp.gradient_accumulation_steps - 1
             with ctx:
                 _, loss = model(X, Y)
-                loss = loss / config.gradient_accumulation_steps  # scale the loss to account for gradient accumulation
+                loss = loss / ddp.gradient_accumulation_steps  # scale the loss to account for gradient accumulation
+            monitor.step(f"[{iter_num}/{micro_step}] forward")
             # immediately async prefetch next batch while model is doing the forward pass on the GPU
             X, Y = get_batch(config=config, split="train")
+            monitor.step(f"[{iter_num}/{micro_step}] get next batch")
             # backward pass, with gradient scaling if training in fp16
             scaler.scale(loss).backward()
+            monitor.step(f"[{iter_num}/{micro_step}] backward")
         # clip the gradient
         if config.grad_clip != 0.0:
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+            monitor.step(f"[{iter_num}/{micro_step}] clip grad")
         # step the optimizer and scaler if training in fp16
         scaler.step(optimizer)
         scaler.update()
+        monitor.step(f"[{iter_num}] scaler step")
         # flush the gradients as soon as we can, no need for this memory anymore
         optimizer.zero_grad(set_to_none=True)
+        monitor.step(f"[{iter_num}] zero grad")
 
         if profiler:
             profiler.step()
@@ -387,9 +417,9 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
         if iter_num % config.log_interval == 0 and ddp.master_process:
             # get loss as float. note: this is a CPU-GPU sync point
             # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
-            lossf = loss.item() * config.gradient_accumulation_steps
+            lossf = loss.item() * ddp.gradient_accumulation_steps
             if local_iter_num >= 5:  # let the training loop settle a bit
-                mfu = raw_model.estimate_mfu(config.batch_size * config.gradient_accumulation_steps, dt)
+                mfu = raw_model.estimate_mfu(config.batch_size * ddp.gradient_accumulation_steps, dt)
                 running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
             print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%")
         iter_num += 1

@@ -3,9 +3,9 @@
 #SBATCH --account=vaz@a100
 #SBATCH --constraint=a100
 
-#SBATCH --nodes=2
-#SBATCH --ntasks-per-node=8
-#SBATCH --gres=gpu:8
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=8
 #SBATCH --hint=nomultithread
 
@@ -41,5 +41,7 @@ srun python train.py \
         batch_size=8 \
         learning_rate=6e-4 \
         dataset='openwebtext' \
-        max_iters=200 \
-        wandb_log=False
+        max_iters=10 \
+        wandb_log=False \
+        gradient_accumulation_steps=4 \
+        debug=True
