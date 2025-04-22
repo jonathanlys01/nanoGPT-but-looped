@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass, field
-from time import time
+from datetime import datetime
 
 from omegaconf import OmegaConf
 
@@ -17,7 +17,12 @@ class GPTConfig:
     use_geglu: bool = True  # Whether to use GEGLU activation (https://arxiv.org/abs/2002.05202), will use GELU if False
     # Loop-Residual parameters
     n_loop: int = 1  # Number of times to loop over the blocks
-    n_encoder: int = 1  # Number of encoders to use
+    use_loop_pe: bool = False  # Whether to use loop positional encoding
+    # Latent transformer parameters
+    n_encoder: int = 0
+    n_decoder: int = 0
+    # use flash attention
+    use_flash_attention: bool = True
 
 
 @dataclass
@@ -36,7 +41,7 @@ class Config:
     # wandb logging
     wandb_log: bool = False  # disabled by default
     wandb_project: str = "looped-gpt2"
-    wandb_run_name: str = f"run{time()}"
+    wandb_run_name: str = f"run{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}"
     # data
     dataset: str = "openwebtext"
     gradient_accumulation_steps: int = 16 * 2  # used to simulate larger batch sizes
@@ -45,15 +50,15 @@ class Config:
     model: GPTConfig = field(default_factory=GPTConfig)
     # adamw optimizer
     learning_rate: float = 6e-4  # max learning rate
-    max_iters: int = 600000  # total number of training iterations
+    max_iters: int = 600_000  # total number of training iterations
     weight_decay: float = 1e-1
     beta1: float = 0.9
     beta2: float = 0.95
     grad_clip: float = 1.0  # clip gradients at this value, or disable if == 0.0
     # learning rate decay settings
     decay_lr: bool = True  # whether to decay the learning rate
-    warmup_iters: int = 2000  # how many steps to warm up for
-    lr_decay_iters: int = 600000  # should be ~= max_iters per Chinchilla
+    warmup_iters: int = 2_000  # how many steps to warm up for
+    lr_decay_iters: int = 600_000  # should be ~= max_iters per Chinchilla
     min_lr: float = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
     # DDP settings
     debug: bool = False
@@ -63,7 +68,6 @@ class Config:
     device: str = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
     dtype: str = "bfloat16"
     compile: bool = False  # use PyTorch 2.0 to compile the model to be faster
-    profile: bool = False  # use PyTorch profiler to profile the model
 
     def __post_init__(self):
         self.data_dir: str = os.path.join("data", self.dataset)

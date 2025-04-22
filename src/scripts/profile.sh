@@ -9,13 +9,13 @@ if [ $N_GPUS -lt 1 ]; then
     exit 1
 fi
 
-mkdir -p small_experiments
+echo "Number of GPUs available: $N_GPUS"
 
 start_time=$(date +%s)
 
 export OMP_NUM_THREADS=2
 
-torchrun --nproc_per_node=$N_GPUS train.py \
+torchrun --nproc_per_node=gpu _profile.py \
         out_dir="small_experiments/test" \
         wandb_run_name="derisk" \
         model.n_encoder=0 \
@@ -28,14 +28,12 @@ torchrun --nproc_per_node=$N_GPUS train.py \
         batch_size=8 \
         learning_rate=6e-4 \
         dataset=openwebtext \
-        max_iters=20 \
+        max_iters=2 \
         wandb_log=False \
-        gradient_accumulation_steps=128 \
         dtype=float16 \
         compile=True \
-        model.use_flash_attention=False \
-        debug=True
-        # profile=True
+        profile=True
+        # debug=True
 
 
 # time taken

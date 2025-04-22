@@ -8,6 +8,7 @@ import math
 
 import idr_torch
 import torch
+from flash_attn import flash_attn_qkvpacked_func
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
@@ -72,7 +73,11 @@ class CausalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.dropout = config.dropout
 
-    def forward(self, x: torch.Tensor):
+        self.forward = self.flash_kernel if config.use_flash_attention else self.sdpa_kernel
+
+        self.config = config
+
+    def sdpa_kernel(self, x: torch.Tensor):
         B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
@@ -90,6 +95,23 @@ class CausalSelfAttention(nn.Module):
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         # output projection
         y = self.resid_dropout(self.c_proj(y))
+        return y
+
+    def flash_kernel(self, x: torch.Tensor):
+        B, T, D = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
+        qkv = self.c_attn(x).view(B, T, 3, self.n_head, D // self.n_head)
+
+        y: torch.Tensor = flash_attn_qkvpacked_func(
+            qkv,
+            causal=True,
+            softmax_scale=1.0 / math.sqrt(D // self.n_head),
+            dropout_p=self.dropout if self.training else 0,
+        )
+
+        y = y.contiguous().view(B, T, D)
+        # output projection
+        y = self.resid_dropout(self.c_proj(y))
+
         return y
 
 
@@ -121,8 +143,14 @@ class TransformerBackbone(nn.Module):
             self.loop_weights = nn.ParameterList(
                 [nn.Parameter(torch.ones(1)) for _ in range(config.n_loop)],
             )
+            if config.use_loop_pe:
+                self.loop_pe = nn.Embedding(config.n_loop, config.n_embd)
+                nn.init.constant_(self.loop_pe.weight, 0.0)
+            else:
+                self.loop_pe = None
         else:
             self.loop_weights = None
+            self.loop_pe = None
 
     def get_loop_weights(self):
         """Get the loop weights for the current iteration"""
@@ -132,11 +160,14 @@ class TransformerBackbone(nn.Module):
 
     def forward(self, x):
         for i in range(self.n_loop):
+            if self.loop_pe is not None:
+                loop_pe = self.loop_pe(torch.tensor(i, device=x.device)).unsqueeze(0)
+                x = x + loop_pe
+
             for block in self.blocks:
                 x = block(x)
 
             if self.loop_weights is not None:
-                # Apply loop weights to the output of the loop
                 x = x * self.loop_weights[i]
         return x
 
@@ -151,8 +182,6 @@ class LoopResidualGPT(nn.Module):
 
     def __init__(self, config: GPTConfig):
         super().__init__()
-        assert config.vocab_size is not None
-        assert config.block_size is not None
         self.config = config
 
         if config.n_encoder > 0:
@@ -161,15 +190,24 @@ class LoopResidualGPT(nn.Module):
             self.print("No encoder blocks")
 
         encoders = nn.Sequential(*[Block(config) for _ in range(config.n_encoder)]) if config.n_encoder > 0 else nn.Identity()
+        decoders = nn.Sequential(*[Block(config) for _ in range(config.n_decoder)]) if config.n_decoder > 0 else nn.Identity()
 
-        # Encoder
+        # Embedding
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.block_size, config.n_embd)
-        self.encoders = encoders
         self.drop = nn.Dropout(config.dropout)
-        self.ln_f = LayerNorm(config.n_embd, bias=config.bias)
-        # Backbone
+        # Latent (enc + backbone + dec)
+
+        if config.use_flash_attention:
+            self.print("Using Flash Attention")
+        else:
+            self.print("Using SDPA Attention")
+
+        self.encoders = encoders
         self.transformer = TransformerBackbone(config)
+        self.decoders = decoders
+        # Final block
+        self.ln_f = LayerNorm(config.n_embd, bias=config.bias)
         # LM head
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
@@ -217,14 +255,18 @@ class LoopResidualGPT(nn.Module):
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
         pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
 
-        # forward the GPT model itself
+        # Embedding
         tok_emb = self.wte(idx)  # token embeddings of shape (b, t, n_embd)
         pos_emb = self.wpe(pos)  # position embeddings of shape (t, n_embd)
         x = self.drop(tok_emb + pos_emb)
-        x = self.encoders(x)  # pass through the encoder blocks if any
 
-        # Process through transformer blocks
+        # Encoder (if any)
+        x = self.encoders(x)  # pass through the encoder blocks if any
+        # Backbone
         x = self.transformer(x)
+        # Decoder (if any)
+        x = self.decoders(x)  # pass through the decoder blocks if any
+
         # final layer norm
         x = self.ln_f(x)
 

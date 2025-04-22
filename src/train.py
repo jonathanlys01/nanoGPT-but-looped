@@ -81,12 +81,14 @@ def _reduce_mean(tensor: torch.Tensor, world_size: int) -> torch.Tensor:
 
 #######################################################################
 # Data
-# Poor man's dataloader, just a function to get a batch of data
 
 
-def _move(x: torch.Tensor, y: torch.Tensor, device):
+def _move(x: torch.Tensor, y: torch.Tensor, device, pin_memory=False):
     if "cuda" in device:
-        x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+        if pin_memory:
+            x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+        else:  # default
+            x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
     else:
         x, y = x.to(device), y.to(device)
     return x, y
@@ -148,7 +150,7 @@ def estimate_loss(model, config: Config, ctx):
         losses = torch.zeros(config.eval_iters).to(config.device)
         for k in range(config.eval_iters):
             X, Y = get_batch(config=config, split=split)
-            X, Y = _move(X, Y, config.device)  # move to GPU
+            X, Y = _move(X, Y, config.device, pin_memory=True)
             with ctx:
                 _, loss = model(X, Y)
             losses[k] = loss
@@ -174,27 +176,6 @@ def get_lr(it, config: Config):
 
 #######################################################################
 # Debug
-
-
-def profiled_run(config: Config):
-    import torch.profiler
-
-    log_dir = "./log_dir"
-
-    os.makedirs(log_dir, exist_ok=True)
-
-    with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(log_dir),
-        record_shapes=True,
-        profile_memory=True,
-        with_stack=True,
-        with_flops=True,
-    ) as prof:
-        run(config, prof)
 
 
 def _debug_ddp():
@@ -228,7 +209,7 @@ class Monitor:
 # Main
 
 
-def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
+def run(config: Config):  # noqa: C901, PLR0912, PLR0915
     ddp = _setup_ddp(config)
     monitor = Monitor(config, ddp.master_process)
     tokens_per_iter = ddp.gradient_accumulation_steps * ddp.world_size * config.batch_size * config.model.block_size
@@ -355,6 +336,7 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
     local_iter_num = 0  # number of iterations in the lifetime of this process
     raw_model = model.module if config.ddp else model  # unwrap DDP container if needed
     running_mfu = -1.0
+    grad_norm = 0.0
 
     while True:
         # determine and set the learning rate for this iteration
@@ -397,6 +379,7 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
                             "mfu": running_mfu * 100,  # convert to percentage
                             # Add Loop-Residual specific info
                             "weights": plot,
+                            "grad_norm": grad_norm,
                         },
                     )
                 if losses["val"] < best_val_loss or config.always_save_checkpoint:
@@ -438,7 +421,7 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
         # clip the gradient
         if config.grad_clip != 0.0:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip).item()
             monitor.step(f"[{iter_num}/{micro_step}] clip grad")
         # step the optimizer and scaler if training in fp16
         scaler.step(optimizer)
@@ -447,9 +430,6 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
         # flush the gradients as soon as we can, no need for this memory anymore
         optimizer.zero_grad(set_to_none=True)
         monitor.step(f"[{iter_num}] zero grad")
-
-        if profiler:
-            profiler.step()
 
         # timing and logging
         t1 = time.time()
@@ -462,7 +442,11 @@ def run(config: Config, profiler=None):  # noqa: C901, PLR0912, PLR0915
             if local_iter_num >= 5:  # let the training loop settle a bit
                 mfu = raw_model.estimate_mfu(config.batch_size * ddp.gradient_accumulation_steps, dt)
                 running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
-            print(f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%")
+
+            log = (
+                f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%, g-norm {grad_norm:.2f}"
+            )
+            print(log)
         iter_num += 1
         local_iter_num += 1
 
@@ -479,7 +463,4 @@ if __name__ == "__main__":
 
     args = get_config()
 
-    if args.profile:
-        profiled_run(args)
-    else:
-        run(args)
+    run(args)

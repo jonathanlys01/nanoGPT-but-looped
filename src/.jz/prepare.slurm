@@ -2,7 +2,7 @@
 #SBATCH --ntasks=1
 #SBATCH --partition=prepost
 #SBATCH --time=05:00:00
-#SBATCH --account=vaz@v100
+#SBATCH --account=vaz@cpu
 #SBATCH --job-name=owt-prepro
 #SBATCH --output=slurm-logs/owt-prepro.out
 #SBATCH --error=slurm-logs/owt-prepro.err

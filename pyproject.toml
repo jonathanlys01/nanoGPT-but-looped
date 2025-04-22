@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "datasets>=3.5.0",
+    "flash-attn>=2.7.4.post1",
     "idr-torch>=2.4.0",
     "numpy>=2.2.4",
     "omegaconf>=2.3.0",
@@ -39,7 +40,7 @@ extend-select = [
 ]
 ignore = [
     "PLR2004", # magic number
-    ]
+]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]
