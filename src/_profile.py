@@ -26,7 +26,7 @@ def dist_profiled_run(config: Config):
 
     model.to(config.device)
     optimizer = model.configure_optimizers(config.weight_decay, config.learning_rate, (config.beta1, config.beta2))
-    model = torch.compile(model)
+    model = torch.compile(model, fullgraph=True, dynamic=False)
 
     model = DDP(model, device_ids=[ddp.local_rank])
 
@@ -81,9 +81,9 @@ def estimate_flop(config: Config):
     flop_counter = FlopCounterMode(display=False, depth=None)
     with flop_counter:
         X, Y = get_batch(config=config, split="train")
-        X, _ = _move(X, Y, device=config.device)
+        X, Y = _move(X, Y, device=config.device)
         with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-            model(X)[0].sum().backward()
+            model(X, Y)[1].sum().backward()
     total_flops = flop_counter.get_total_flops()
     print(f"Total FLOPs: {total_flops / 1e9:.2f} GFLOPs")
 
@@ -94,7 +94,7 @@ def estimate_flop(config: Config):
         X, Y = get_batch(config=config, split="train")
         X, Y = _move(X, Y, device=config.device)
         with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
-            model(X)[0].sum().backward()
+            model(X, Y)[1].sum().backward()
     t1 = time.time()
 
     mfu = model.estimate_mfu(config.batch_size * N, dt=t1 - t0)

@@ -25,23 +25,22 @@ module load arch/a100
 module load pytorch-gpu/py3/2.6.0
 
 mkdir -p slurm-logs
-mkdir -p small_experiments
+mkdir -p experiments
 
 set -x
 srun python train.py \
-        out_dir="small_experiments/test" \
-        wandb_run_name="derisk_run" \
+        out_dir="experiments/baseline" \
+        wandb_run_name="baseline" \
+        wandb_log=True \
         model.n_encoder=0 \
-        model.n_layer=4 \
-        model.n_loop=2 \
-        model.n_head=4 \
-        model.n_embd=256 \
+        model.n_layer=12 \
+        model.n_loop=1 \
+        model.n_head=12 \
+        model.n_embd=768 \
         init_from='scratch' \
-        model.dropout=0.1 \
-        batch_size=8 \
+        batch_size=32 \
         learning_rate=6e-4 \
-        dataset='openwebtext' \
+        dataset=fineweb-edu \
         max_iters=100_000 \
         lr_decay_iters=100_000 \
-        wandb_log=False \
         gradient_accumulation_steps=128

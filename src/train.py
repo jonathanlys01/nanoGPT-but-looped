@@ -246,7 +246,8 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
 
     if config.init_from == "scratch":
         # init a new model from scratch
-        print("Initializing a new model from scratch")
+        if ddp.master_process:
+            print("Initializing a new model from scratch")
         # determine the vocab size we'll use for from-scratch training
         if meta_vocab_size is None and ddp.master_process:
             print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
@@ -308,7 +309,12 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
     if config.compile:
         if ddp.master_process:
             print("compiling the model... (takes a ~minute)")
-        model = torch.compile(model)  # requires PyTorch 2.0
+        model = torch.compile(
+            model,
+            mode="default",
+            fullgraph=True,
+            dynamic=True,
+        )  # requires PyTorch 2.0
 
     # wrap model into DDP container
     if config.ddp:
@@ -318,7 +324,6 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
     if config.wandb_log and ddp.master_process:
         import wandb
 
-        # Add Loop-Residual info to the config for wandb
         wandb.init(project=config.wandb_project, name=config.wandb_run_name, config=config)
 
     monitor.step("optimizer/compile/(wandb) init")

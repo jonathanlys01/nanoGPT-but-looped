@@ -43,7 +43,7 @@ class Config:
     wandb_project: str = "looped-gpt2"
     wandb_run_name: str = f"run{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}"
     # data
-    dataset: str = "openwebtext"
+    dataset: str = "openwebtext"  # openwebtext, fineweb-edu
     gradient_accumulation_steps: int = 16 * 2  # used to simulate larger batch sizes
     batch_size: int = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
     # model

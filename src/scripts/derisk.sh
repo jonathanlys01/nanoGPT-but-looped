@@ -20,22 +20,19 @@ torchrun --nproc_per_node=$N_GPUS train.py \
         wandb_run_name="derisk" \
         model.n_encoder=0 \
         model.n_layer=4 \
-        model.n_loop=2 \
-        model.n_head=4 \
-        model.n_embd=256 \
+        model.n_loop=3 \
+        model.n_head=12 \
+        model.n_embd=768 \
         init_from='scratch' \
         model.dropout=0.1 \
         batch_size=8 \
         learning_rate=6e-4 \
-        dataset=openwebtext \
         max_iters=20 \
         wandb_log=False \
         gradient_accumulation_steps=128 \
-        dtype=float16 \
         compile=True \
-        model.use_flash_attention=False \
-        debug=True
-        # profile=True
+        dataset=fineweb-edu
+        # debug=True
 
 
 # time taken

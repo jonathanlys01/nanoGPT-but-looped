@@ -104,7 +104,6 @@ class CausalSelfAttention(nn.Module):
         y: torch.Tensor = flash_attn_qkvpacked_func(
             qkv,
             causal=True,
-            softmax_scale=1.0 / math.sqrt(D // self.n_head),
             dropout_p=self.dropout if self.training else 0,
         )
 
@@ -184,10 +183,9 @@ class LoopResidualGPT(nn.Module):
         super().__init__()
         self.config = config
 
-        if config.n_encoder > 0:
-            self.print(f"Using {config.n_encoder} encoder blocks")
-        else:
-            self.print("No encoder blocks")
+        self.print(
+            f"\033[94mLayout {config.n_encoder}E / {config.n_layer}L x {config.n_loop}Loop / {config.n_decoder}D\033[0m",
+        )
 
         encoders = nn.Sequential(*[Block(config) for _ in range(config.n_encoder)]) if config.n_encoder > 0 else nn.Identity()
         decoders = nn.Sequential(*[Block(config) for _ in range(config.n_decoder)]) if config.n_decoder > 0 else nn.Identity()
@@ -222,7 +220,8 @@ class LoopResidualGPT(nn.Module):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer))
 
         # report number of parameters
-        self.print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
+        self.print("number of parameters (includ-embed): %.2fM" % (self.get_num_params(non_embedding=False) / 1e6,))
+        self.print("number of parameters (non-embedding): %.2fM" % (self.get_num_params(non_embedding=True) / 1e6,))
 
     def print(self, s):
         # only self.print on rank 0
@@ -249,7 +248,8 @@ class LoopResidualGPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, targets=None):
+    def _forward(self, idx):
+        """forward pass of the model, but without the lm_head"""
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
@@ -269,16 +269,20 @@ class LoopResidualGPT(nn.Module):
 
         # final layer norm
         x = self.ln_f(x)
+        return x
 
-        if targets is not None:
-            # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
-        else:
-            # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(x[:, [-1], :])  # note: using list [-1] to preserve the time dim
-            loss = None
+    def forwad_gen(self, idx):
+        # inference-time mini-optimization: only forward the lm_head on the very last position
+        x = self._forward(idx)
+        logits = self.lm_head(x[:, [-1], :])  # note: using list [-1] to preserve the time dim
+        loss = None
 
+        return logits, loss
+
+    def forward(self, idx, targets):
+        x = self._forward(idx)
+        logits = self.lm_head(x)
+        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         return logits, loss
 
     def crop_block_size(self, block_size):
@@ -322,7 +326,7 @@ class LoopResidualGPT(nn.Module):
         cfg = self.config
         H, Q, T = cfg.n_head, cfg.n_embd // cfg.n_head, cfg.block_size
         # L is the number of forward passes through the transformer blocks
-        L = cfg.n_layer * cfg.n_loop + cfg.n_encoder
+        L = cfg.n_layer * cfg.n_loop + cfg.n_encoder + cfg.n_decoder
         flops_per_token = 6 * N + 12 * L * H * Q * T
         flops_per_fwdbwd = flops_per_token * T
         flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter

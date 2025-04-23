@@ -3,9 +3,9 @@
 #SBATCH --partition=prepost
 #SBATCH --time=05:00:00
 #SBATCH --account=vaz@cpu
-#SBATCH --job-name=owt-prepro
-#SBATCH --output=slurm-logs/owt-prepro.out
-#SBATCH --error=slurm-logs/owt-prepro.err
+#SBATCH --job-name=fw-prepro
+#SBATCH --output=slurm-logs/fw-prepro.out
+#SBATCH --error=slurm-logs/fw-prepro.err
 
 # Load the modules      
 
@@ -16,8 +16,8 @@ module load pytorch-gpu/py3/2.6.0
 
 mkdir -p slurm-logs
 
-srun python data/openwebtext/prepare.py \
+srun python data/fineweb-edu/prepare.py \
         --num_proc 8 \
-        --path $DSDIR/HuggingFace/Skylion007/openwebtext \
+        --path $DSDIR/HuggingFace/HuggingFaceFW/fineweb-edu/sample/10BT/* \
         --cache_dir $SCRATCH/junk \
         --encoding gpt2

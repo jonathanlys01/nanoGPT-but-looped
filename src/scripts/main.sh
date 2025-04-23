@@ -10,7 +10,7 @@ GRADIENT_ACCUMULATION_STEPS=64  # Adjusted for smaller batch size
 LEARNING_RATE=6e-4
 DATASET="openwebtext"
 WANDB_LOG=True
-MAX_ITERS=10_000  # Reduced significantly for faster experimentation
+MAX_ITERS=40_000
 DROPOUT=0.1      # Adding some dropout for these smaller models
 
 N_GPUS=$(nvidia-smi -L | wc -l)
@@ -32,56 +32,40 @@ COMMON="model.n_head=4 \
         learning_rate=$LEARNING_RATE \
         dataset=$DATASET \
         max_iters=$MAX_ITERS \
+        lr_decay_iters=$MAX_ITERS \
         wandb_log=$WANDB_LOG
         compile=True"
 
+export OMP_NUM_THREADS=2
 
-
-# # Baseline (0 E / 4 L / 1 Loop)
-# torchrun --nproc_per_node=$N_GPUS train.py \
-#         out_dir="small_experiments/baseline" \
-#         wandb_run_name="re-0E-4L-1Loop" \
-#         model.n_encoder=0 \
-#         model.n_layer=4 \
-#         model.n_loop=1 \
-#         $COMMON
-
-
-# # Exp 1 (1 E / 3 L / 2 Loop)
-# torchrun --nproc_per_node=$N_GPUS train.py \
-#         out_dir="small_experiments/exp2" \
-#         wandb_run_name="re-1E-3L-2Loop" \
-#         model.n_encoder=1 \
-#         model.n_layer=3 \
-#         model.n_loop=2 \
-#         $COMMON
-
-# # Exp 2 (1 E / 3 L / 4 Loop)
-# torchrun --nproc_per_node=$N_GPUS train.py \
-#         out_dir="small_experiments/exp2" \
-#         wandb_run_name="re-1E-3L-4Loop" \
-#         model.n_encoder=1 \
-#         model.n_layer=3 \
-#         model.n_loop=4 \
-#         $COMMON
-
-# # Exp 3 (1 E / 3 L / 8 Loop)
-# torchrun --nproc_per_node=$N_GPUS train.py \
-#         out_dir="small_experiments/exp3" \
-#         wandb_run_name="re-1E-3L-8Loop" \
-#         model.n_encoder=1 \
-#         model.n_layer=3 \
-#         model.n_loop=8 \
-#         $COMMON
-
-# Exp 4 (1 E / 3 L / 4 Loop, loop pe)
-torchrun --nproc_per_node=$N_GPUS train.py \
-        out_dir="small_experiments/exp4" \
-        wandb_run_name="re-1E-3L-4Loop-pe" \
-        model.n_encoder=1 \
-        model.n_layer=3 \
+# Exp 1 (2 E / 4 L x 4 Loop / 0 D)
+torchrun --nproc_per_node=gpu train.py \
+        out_dir="small_experiments/exp1" \
+        wandb_run_name="long-2E-4Lx4-0D" \
+        model.n_encoder=2 \
+        model.n_layer=4 \
         model.n_loop=4 \
-        model.use_loop_pe=True \
+        model.n_decoder=0 \
+        $COMMON
+
+# Exp 2 (0 E / 6 L x 3 Loop / 0 D)
+torchrun --nproc_per_node=gpu train.py \
+        out_dir="small_experiments/exp2" \
+        wandb_run_name="long-0E-6Lx3-0D" \
+        model.n_encoder=0 \
+        model.n_layer=6 \
+        model.n_loop=3 \
+        model.n_decoder=0 \
+        $COMMON
+
+# Exp 3 (1 E / 4 L x 4 Loop / 1 D)
+torchrun --nproc_per_node=gpu train.py \
+        out_dir="small_experiments/exp3" \
+        wandb_run_name="long-1E-4Lx4-1D" \
+        model.n_encoder=1 \
+        model.n_layer=4 \
+        model.n_loop=4 \
+        model.n_decoder=1 \
         $COMMON
 
 # time taken
