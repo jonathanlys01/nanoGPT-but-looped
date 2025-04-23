@@ -19,6 +19,6 @@ mkdir -p slurm-logs
 
 srun python data/fineweb-edu/prepare.py \
         --num_proc 8 \
-        --path $DSDIR/HuggingFace/HuggingFaceFW/fineweb-edu/sample/10BT/* \
+        --path $DSDIR/HuggingFace/HuggingFaceFW/fineweb-edu/sample/10BT \
         --cache_dir $SCRATCH/junk \
         --encoding gpt2

@@ -25,7 +25,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--path",
-        default="/Brain/public/datasets/HuggingFaceFW/fineweb-edu/sample/10BT/*",
+        default="/Brain/public/datasets/HuggingFaceFW/fineweb-edu/sample/10BT/",
         type=str,
     )
     parser.add_argument(
@@ -42,6 +42,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     enc = tiktoken.get_encoding(args.encoding)
+
+    if os.path.isdir(args.path):
+        # if path is a directory, use the files in the directory
+        args.path = os.path.join(args.path, "*.parquet")
 
     dataset = load_dataset(
         "parquet",
