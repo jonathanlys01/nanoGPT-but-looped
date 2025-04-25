@@ -38,30 +38,10 @@ COMMON="model.n_head=4 \
 
 export OMP_NUM_THREADS=2
 
-# Exp 1 (1 E / 4 L x 4 Loop / 1 D)
-torchrun --nproc_per_node=gpu train.py \
-        out_dir="small_experiments/exp1" \
-        wandb_run_name="long-1E-4Lx4-1D-relaunch" \
-        model.n_encoder=1 \
-        model.n_layer=4 \
-        model.n_loop=4 \
-        model.n_decoder=1 \
-        $COMMON
-
-# Exp 2 (0 E / 4 L x 4 Loop / 2 D)
-torchrun --nproc_per_node=gpu train.py \
-        out_dir="small_experiments/exp2" \
-        wandb_run_name="long-0E-4Lx4-2D" \
-        model.n_encoder=0 \
-        model.n_layer=4 \
-        model.n_loop=4 \
-        model.n_decoder=2 \
-        $COMMON
-
 # Exp 3 (2 E / 2 L x 7 Loop / 2 D)
 torchrun --nproc_per_node=gpu train.py \
         out_dir="small_experiments/exp3" \
-        wandb_run_name="long-2E-2Lx7-2D" \
+        wandb_run_name="long-2E-2Lx7-2D-relaunch" \
         model.n_encoder=2 \
         model.n_layer=2 \
         model.n_loop=7 \
