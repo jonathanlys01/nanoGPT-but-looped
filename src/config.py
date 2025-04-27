@@ -39,7 +39,7 @@ class Config:
     num_workers: int = 4  # number of data loading workers
     prefetch_factor: int = 3  # number of batches to prefetch
     # wandb logging
-    wandb_log: bool = False  # disabled by default
+    wandb_log: bool = True  # disabled by default
     wandb_project: str = "looped-gpt2"
     wandb_run_name: str = f"run{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}"
     # data
