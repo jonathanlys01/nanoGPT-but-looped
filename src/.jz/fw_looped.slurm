@@ -44,5 +44,5 @@ srun python train.py \
         dataset=fineweb-edu \
         max_iters=2_500 \
         lr_decay_iters=2_500 \
-        gradient_accumulation_steps= 128 \
+        gradient_accumulation_steps=128 \
         eval_iters=10
