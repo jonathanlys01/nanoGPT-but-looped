@@ -65,7 +65,8 @@ class Config:
     backend: str = "nccl"  # 'nccl', 'gloo', etc.
     ddp: bool = True
     # system
-    device: str = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+    device: str = "cpu:gloo,cuda:nccl"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+    # try "cpu:gloo,cuda:nccl" for async save to work
     dtype: str = "bfloat16"
     compile: bool = False  # use PyTorch 2.0 to compile the model to be faster
 

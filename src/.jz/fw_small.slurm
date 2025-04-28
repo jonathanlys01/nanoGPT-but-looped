@@ -30,7 +30,7 @@ mkdir -p small_experiments
 set -x
 srun python train.py \
         out_dir="small_experiments/fineweb_baseline" \
-        wandb_run_name="gpt2-baseline" \
+        wandb_run_name="gpt2-baseline_logged" \
         model.n_encoder=0 \
         model.n_layer=12 \
         model.n_loop=1 \
@@ -44,4 +44,7 @@ srun python train.py \
         max_iters=2_500 \
         lr_decay_iters=2_500 \
         gradient_accumulation_steps=128 \
-        eval_iters=10
+        eval_interval=10 \
+        eval_iters=50 \
+        warmup_iters=100 \
+        always_save_checkpoint=True

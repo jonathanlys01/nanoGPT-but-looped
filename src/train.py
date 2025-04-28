@@ -8,6 +8,7 @@ from os.path import join as pjoin
 
 import numpy as np
 import torch
+import torch.distributed.checkpoint as dcp
 from torch.distributed import all_reduce, destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import IterableDataset
@@ -39,7 +40,8 @@ def _setup_ddp(config: Config) -> DDPConfig:
         ddp_world_size = idr_torch.size
 
         init_process_group(
-            backend=config.backend,
+            # backend=config.backend,
+            backend="cpu:gloo,cuda:nccl",
             init_method="env://",
             world_size=ddp_world_size,
             rank=ddp_rank,
@@ -343,6 +345,8 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
     running_mfu = -1.0
     grad_norm = 0.0
 
+    checkpoint_future = None
+
     while True:
         # determine and set the learning rate for this iteration
         lr = get_lr(iter_num, config) if config.decay_lr else config.learning_rate
@@ -387,19 +391,28 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
                             "grad_norm": grad_norm,
                         },
                     )
-                if losses["val"] < best_val_loss or config.always_save_checkpoint:
-                    best_val_loss = losses["val"]
-                    if iter_num > 0:
-                        checkpoint = {
-                            "model": raw_model.state_dict(),
-                            "optimizer": optimizer.state_dict(),
-                            "model_args": model_args,
-                            "iter_num": iter_num,
-                            "best_val_loss": best_val_loss,
-                            "config": config,
-                        }
+
+            if losses["val"] < best_val_loss and config.always_save_checkpoint:
+                best_val_loss = losses["val"]
+                if iter_num > 0:
+                    checkpoint = {
+                        "model": raw_model.state_dict(),
+                        "optimizer": optimizer.state_dict(),
+                        "model_args": model_args,
+                        "iter_num": iter_num,
+                        "best_val_loss": best_val_loss,
+                        "config": config,
+                    }
+
+                    if ddp.master_process:
                         print(f"saving checkpoint to {config.out_dir}")
-                        torch.save(checkpoint, os.path.join(config.out_dir, "ckpt.pt"))
+
+                    # torch.save(checkpoint, os.path.join(config.out_dir, "ckpt.pt"))
+                    if checkpoint_future is not None:
+                        checkpoint_future.result()
+
+                    checkpoint_future = dcp.async_save(checkpoint, checkpoint_id="ckpt.pt")
+
         if iter_num == 0 and config.eval_only:
             break
 
@@ -446,7 +459,7 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
             lossf = loss.item() * ddp.gradient_accumulation_steps
             if local_iter_num >= 5:  # let the training loop settle a bit
                 mfu = raw_model.estimate_mfu(config.batch_size * ddp.gradient_accumulation_steps, dt)
-                running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
+                running_mfu = mfu if running_mfu == -1.0 else 0.95 * running_mfu + 0.05 * mfu
 
             log = (
                 f"iter {iter_num}: loss {lossf:.4f}, time {dt * 1000:.2f}ms, mfu {running_mfu * 100:.2f}%, g-norm {grad_norm:.2f}"

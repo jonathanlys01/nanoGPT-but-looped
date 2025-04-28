@@ -15,23 +15,27 @@ start_time=$(date +%s)
 
 export OMP_NUM_THREADS=2
 
-torchrun --nproc_per_node=$N_GPUS train.py \
+torchrun --nproc_per_node=gpu train.py \
         out_dir="small_experiments/test" \
         wandb_run_name="derisk" \
         model.n_encoder=0 \
-        model.n_layer=4 \
-        model.n_loop=3 \
+        model.n_layer=12 \
+        model.n_loop=1 \
         model.n_head=12 \
         model.n_embd=768 \
         init_from='scratch' \
-        model.dropout=0.1 \
-        batch_size=8 \
+        batch_size=32 \
         learning_rate=6e-4 \
-        max_iters=20 \
+        max_iters=100 \
         wandb_log=False \
         gradient_accumulation_steps=128 \
         compile=True \
-        dataset=fineweb-edu
+        dataset=fineweb-edu \
+        eval_interval=10 \
+        eval_iters=50 \
+        warmup_iters=100 \
+        always_save_checkpoint=True
+        # less eval_iters bc parallelized across GPUs
         # debug=True
 
 
