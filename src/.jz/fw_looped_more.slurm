@@ -12,7 +12,7 @@
 #SBATCH --job-name=fineweb-loopedgpt
 #SBATCH --output=slurm-logs/%j-%x.out
 #SBATCH --error=slurm-logs/%j-%x.err
-#SBATCH --time=07:00:00
+#SBATCH --time=10:00:00
 #SBATCH --qos=qos_gpu_a100-t3
 # Load the modules
 
@@ -42,8 +42,8 @@ srun python train.py \
         batch_size=32 \
         learning_rate=6e-4 \
         dataset=fineweb-edu \
-        max_iters=2_500 \
-        lr_decay_iters=2_500 \
+        max_iters=2_000 \
+        lr_decay_iters=2_000 \
         gradient_accumulation_steps=128 \
         eval_interval=10 \
         eval_iters=50 \
