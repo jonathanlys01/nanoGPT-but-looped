@@ -40,8 +40,7 @@ def _setup_ddp(config: Config) -> DDPConfig:
         ddp_world_size = idr_torch.size
 
         init_process_group(
-            # backend=config.backend,
-            backend="cpu:gloo,cuda:nccl",
+            backend=config.backend,
             init_method="env://",
             world_size=ddp_world_size,
             rank=ddp_rank,

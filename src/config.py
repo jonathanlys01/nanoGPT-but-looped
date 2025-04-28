@@ -62,11 +62,11 @@ class Config:
     min_lr: float = 6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
     # DDP settings
     debug: bool = False
-    backend: str = "nccl"  # 'nccl', 'gloo', etc.
+    backend: str = "cpu:gloo,cuda:nccl"  # 'nccl', 'gloo', etc.
+    # try "cpu:gloo,cuda:nccl" for async save to work
     ddp: bool = True
     # system
-    device: str = "cpu:gloo,cuda:nccl"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
-    # try "cpu:gloo,cuda:nccl" for async save to work
+    device: str = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
     dtype: str = "bfloat16"
     compile: bool = False  # use PyTorch 2.0 to compile the model to be faster
 
