@@ -29,8 +29,8 @@ mkdir -p small_experiments
 
 set -x
 srun python train.py \
-        out_dir="small_experiments/fineweb_looped_more" \
-        wandb_run_name="gpt2-looped_more" \
+        out_dir="small_experiments/fineweb_looped_long_d" \
+        wandb_run_name="gpt2-looped_long_decoder" \
         model.n_encoder=4 \
         model.n_layer=4 \
         model.n_loop=3 \
