@@ -138,7 +138,7 @@ class TransformerBackbone(nn.Module):
         assert config.n_loop > 0, "Number of loops must be greater than 0"
 
         self.n_loop = config.n_loop
-        if config.n_loop > 1:
+        if config.n_loop > 1 and config.use_loop_weight:
             self.loop_weights = nn.ParameterList(
                 [nn.Parameter(torch.ones(1)) for _ in range(config.n_loop)],
             )
@@ -157,8 +157,10 @@ class TransformerBackbone(nn.Module):
             return [w.item() for w in self.loop_weights]
         return [1.0]
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         for i in range(self.n_loop):
+            x_copy = x.clone()
+
             if self.loop_pe is not None:
                 loop_pe = self.loop_pe(torch.tensor(i, device=x.device)).unsqueeze(0)
                 x = x + loop_pe
@@ -167,7 +169,7 @@ class TransformerBackbone(nn.Module):
                 x = block(x)
 
             if self.loop_weights is not None:
-                x = x * self.loop_weights[i]
+                x = x_copy + self.loop_weights[i] * x
         return x
 
 

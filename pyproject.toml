@@ -41,6 +41,7 @@ extend-select = [
 ]
 ignore = [
     "PLR2004", # magic number
+    "PLR0913", # too many arguments
 ]
 
 # Allow fix for all enabled rules (when `--fix`) is provided.

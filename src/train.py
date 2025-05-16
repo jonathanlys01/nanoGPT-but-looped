@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.distributed.checkpoint as dcp
 from torch.distributed import all_reduce, destroy_process_group, init_process_group
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import IterableDataset
 
@@ -319,7 +320,7 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
 
     # wrap model into DDP container
     if config.ddp:
-        model = DDP(model, device_ids=[ddp.local_rank])
+        model = FSDP(model, device_id=ddp.local_rank) if config.fsdp else DDP(model, device_ids=[ddp.local_rank])
 
     # logging
     if config.wandb_log and ddp.master_process:
@@ -410,7 +411,7 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
                     if checkpoint_future is not None:
                         checkpoint_future.result()
 
-                    checkpoint_future = dcp.async_save(checkpoint, checkpoint_id="ckpt.pt")
+                    checkpoint_future = dcp.async_save(checkpoint, checkpoint_id=os.path.join(config.out_dir, "ckpt"))
 
         if iter_num == 0 and config.eval_only:
             break
@@ -469,6 +470,13 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
 
         # termination conditions
         if iter_num > config.max_iters:
+            # save last model
+            if ddp.master_process:
+                print(f"saving final model to {config.out_dir}")
+                torch.save(
+                    raw_model.state_dict(),
+                    os.path.join(config.out_dir, "final_model.pt"),
+                )
             break
 
     if config.ddp:

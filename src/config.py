@@ -18,6 +18,7 @@ class GPTConfig:
     # Loop-Residual parameters
     n_loop: int = 1  # Number of times to loop over the blocks
     use_loop_pe: bool = False  # Whether to use loop positional encoding
+    use_loop_weight: bool = False  # Whether to use loop weight
     # Latent transformer parameters
     n_encoder: int = 0
     n_decoder: int = 0
@@ -65,6 +66,7 @@ class Config:
     backend: str = "cpu:gloo,cuda:nccl"  # 'nccl', 'gloo', etc.
     # try "cpu:gloo,cuda:nccl" for async save to work
     ddp: bool = True
+    fsdp: bool = False
     # system
     device: str = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
     dtype: str = "bfloat16"
@@ -105,12 +107,28 @@ train_gpt2 = Config(
     weight_decay=1e-1,
 )
 
+CONFIG_FLAGS = ("--config", "-c", "config", "cfg")
+
 
 def get_config() -> Config:
     """
     Read args from CLI, merge with defaults and return a read-only Config object.
+    The config file can be specified with the --config/-c/config argument.
     """
-    default_cfg = OmegaConf.structured(Config)
     sys_args = OmegaConf.from_cli()
-    args = OmegaConf.merge(default_cfg, sys_args)
+
+    if any(flag in sys_args for flag in CONFIG_FLAGS):
+        flag = next(flag for flag in CONFIG_FLAGS if flag in sys_args)
+        cfg_file = sys_args.pop(flag)  # remove the flag from sys_args
+        add_args = OmegaConf.load(cfg_file)
+    else:
+        add_args = sys_args
+
+    default_cfg = OmegaConf.structured(Config)
+    args = OmegaConf.merge(default_cfg, add_args)
     return Config(**args)
+
+
+if __name__ == "__main__":
+    cfg = get_config()
+    print(OmegaConf.to_yaml(cfg))

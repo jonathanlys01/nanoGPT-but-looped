@@ -7,8 +7,13 @@ __pycache__/
 *.pkl
 *.pt
 *.pyc
+.cache
 input.txt
 env/
 venv/
 wandb/
 log_dir/
+small_experiments/
+
+*.distcp
+.metadata
