@@ -14,20 +14,21 @@ mkdir -p small_experiments
 start_time=$(date +%s)
 
 export OMP_NUM_THREADS=2
-export NCCL_P2P_LEVEL=PXB
+export NCCL_P2P_LEVEL=PXB # only on non nvlink
 
 torchrun --nproc_per_node=gpu train.py \
         out_dir="small_experiments/test" \
-        wandb_run_name="derisk" \
+        wandb_run_name="nv-a100-speedtest-fsdp" \
         model.n_encoder=0 \
-        model.n_layer=4 \
-        model.n_loop=4 \
-        model.n_decoder=2 \
-        model.n_head=4 \
-        model.n_embd=256 \
+        model.n_layer=12 \
+        model.n_loop=1 \
+        model.n_decoder=0 \
+        model.n_head=12 \
+        model.n_embd=768 \
         model.use_loop_weight=False \
         init_from='scratch' \
         batch_size=32 \
+        fsdp=True \
         learning_rate=6e-4 \
         max_iters=20 \
         wandb_log=False \
@@ -36,10 +37,7 @@ torchrun --nproc_per_node=gpu train.py \
         eval_interval=20 \
         eval_iters=50 \
         warmup_iters=100 \
-        always_save_checkpoint=False
-        # less eval_iters bc parallelized across GPUs
-        # debug=True
-
+        always_save_checkpoint=False compile=True
 
 # time taken
 end_time=$(date +%s)

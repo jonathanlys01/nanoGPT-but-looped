@@ -11,6 +11,7 @@ The core idea of Loop-Residual Neural Networks is simple but powerful:
 
 This approach follows the formula: x^(n) = x^(n-1) + fθ(x^(n-1))
 
+
 Where:
 - x^(n) is the hidden state at iteration n
 - x^(0) is the initial hidden state
@@ -18,8 +19,8 @@ Where:
 
 ## install
 
-```
-pip install torch numpy transformers datasets tiktoken wandb tqdm
+```bash
+uv sync && uv pip install --no-build-isolation flash-attn
 ```
 
 Dependencies:

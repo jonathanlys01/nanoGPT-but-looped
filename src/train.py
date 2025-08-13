@@ -308,19 +308,25 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
     if config.init_from == "resume":
         optimizer.load_state_dict(checkpoint["optimizer"])
     checkpoint = None  # free up memory
+
+    # wrap model into DDP container
+    original_num_params = model.get_num_params()  # get the number of parameters before wrapping
+    if config.ddp:
+        model = (
+            FSDP(model, device_id=ddp.local_rank, use_orig_params=True)
+            if config.fsdp
+            else DDP(model, device_ids=[ddp.local_rank])
+        )
+
     if config.compile:
         if ddp.master_process:
             print("compiling the model... (takes a ~minute)")
         model = torch.compile(
             model,
             mode="default",
-            fullgraph=True,
-            dynamic=True,
+            # fullgraph=True,
+            # dynamic=True,
         )  # requires PyTorch 2.0
-
-    # wrap model into DDP container
-    if config.ddp:
-        model = FSDP(model, device_id=ddp.local_rank) if config.fsdp else DDP(model, device_ids=[ddp.local_rank])
 
     # logging
     if config.wandb_log and ddp.master_process:
@@ -458,7 +464,7 @@ def run(config: Config):  # noqa: C901, PLR0912, PLR0915
             # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
             lossf = loss.item() * ddp.gradient_accumulation_steps
             if local_iter_num >= 5:  # let the training loop settle a bit
-                mfu = raw_model.estimate_mfu(config.batch_size * ddp.gradient_accumulation_steps, dt)
+                mfu = raw_model.estimate_mfu(config.batch_size * ddp.gradient_accumulation_steps, dt, n=original_num_params)
                 running_mfu = mfu if running_mfu == -1.0 else 0.95 * running_mfu + 0.05 * mfu
 
             log = (

@@ -14,6 +14,6 @@ venv/
 wandb/
 log_dir/
 small_experiments/
-
+.venv
 *.distcp
 .metadata

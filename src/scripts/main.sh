@@ -20,7 +20,7 @@ export OMP_NUM_THREADS=2
 
 torchrun --nproc_per_node=gpu train.py \
         out_dir="small_experiments/gpt2" \
-        wandb_run_name="gpt2-124M" \
+        wandb_run_name="gpt2-124M-true_skip" \
         model.n_encoder=0 \
         model.n_layer=12 \
         model.n_loop=1 \
@@ -28,6 +28,7 @@ torchrun --nproc_per_node=gpu train.py \
         model.n_head=12 \
         model.n_embd=768 \
         model.use_loop_weight=False \
+        model.skip_first=True \
         init_from='scratch' \
         compile=True \
         batch_size=32 \

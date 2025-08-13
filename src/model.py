@@ -128,12 +128,32 @@ class Block(nn.Module):
         return x
 
 
+class SkipBlock(nn.Module):
+    def __init__(self, config: GPTConfig):
+        super().__init__()
+        self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
+        self.attn = CausalSelfAttention(config)
+        self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
+        self.mlp = MLP(config)
+
+    def forward(self, x):
+        x = self.mlp(self.ln_2(self.attn(self.ln_1(x))))
+        return x
+
+
 class TransformerBackbone(nn.Module):
     """Loop-Residual block that performs multiple iterations over the transformer blocks"""
 
     def __init__(self, config: GPTConfig):
         super().__init__()
-        self.blocks = nn.ModuleList([Block(config) for _ in range(config.n_layer)])
+        block_list = []
+
+        if config.skip_first:
+            block_list = [SkipBlock(config)] + [Block(config) for _ in range(config.n_layer - 1)]
+        else:
+            block_list = [Block(config) for _ in range(config.n_layer)]
+
+        self.blocks = nn.ModuleList(block_list)
 
         assert config.n_loop > 0, "Number of loops must be greater than 0"
 
@@ -320,11 +340,12 @@ class LoopResidualGPT(nn.Module):
 
         return optimizer
 
-    def estimate_mfu(self, fwdbwd_per_iter, dt):
+    def estimate_mfu(self, fwdbwd_per_iter, dt, n=None):
         """estimate model flops utilization (MFU) in units of A100 bfloat16 peak FLOPS"""
         # first estimate the number of flops we do per iteration.
         # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
-        N = self.get_num_params()
+
+        N = n if n is not None else self.get_num_params()
         cfg = self.config
         H, Q, T = cfg.n_head, cfg.n_embd // cfg.n_head, cfg.block_size
         # L is the number of forward passes through the transformer blocks

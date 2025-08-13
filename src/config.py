@@ -16,6 +16,7 @@ class GPTConfig:
     bias: bool = True  # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     use_geglu: bool = True  # Whether to use GEGLU activation (https://arxiv.org/abs/2002.05202), will use GELU if False
     # Loop-Residual parameters
+    skip_first: bool = False  # Whether to skip the first residual connection
     n_loop: int = 1  # Number of times to loop over the blocks
     use_loop_pe: bool = False  # Whether to use loop positional encoding
     use_loop_weight: bool = False  # Whether to use loop weight
